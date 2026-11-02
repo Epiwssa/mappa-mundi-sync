@@ -1,0 +1,10 @@
+[general]
+name=Mappa Mundi Sync
+qgisMinimumVersion=3.28
+description=Sync a QGIS project to the Mappa Mundi field app over local Wi-Fi.
+about=Runs a small sync server on this computer. The Mappa Mundi phone app downloads layers, styles and offline raster tiles, and pushes field edits and photos back into the project's layers.
+version=0.2.0
+category=Plugins
+experimental=True
+supportsQt6=True
+tags=field,mobile,sync,survey
