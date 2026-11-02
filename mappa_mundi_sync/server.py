@@ -71,14 +71,14 @@ def local_ip_addresses():
         ips.append(s.getsockname()[0])
         s.close()
     except OSError:
-        pass
+        pass  # no default route (offline): fall back to the host name lookup below
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             ip = info[4][0]
             if not ip.startswith("127.") and ip not in ips:
                 ips.append(ip)
     except OSError:
-        pass
+        pass  # host name does not resolve: use the default-route address (or 127.0.0.1)
     return ips or ["127.0.0.1"]
 
 
@@ -111,7 +111,9 @@ class SyncServer:
         class Handler(_Handler):
             sync = server
 
-        self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), Handler)
+        # Phones connect over the local network, so the server must listen on the LAN interfaces.
+        # It only runs while the user has pressed Start, and every request except /api/ping needs the PIN.
+        self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), Handler)  # nosec B104
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="mapper-sync", daemon=True)
         self.thread.start()

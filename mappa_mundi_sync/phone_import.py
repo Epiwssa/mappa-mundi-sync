@@ -1,6 +1,7 @@
 """Receives layers made on a phone (phone projects, GPS tracks, imported files) and
 writes them into a GeoPackage next to the QGIS project. Runs on the main thread."""
 
+import contextlib
 import os
 
 from qgis.core import (
@@ -117,10 +118,9 @@ def import_phone_layers(payload):
             for i, field in enumerate(mem.fields()):
                 value = props.get(field.name())
                 if value is not None and value != "":
-                    try:
+                    # If it can't be converted, keep the phone's value and let the provider decide.
+                    with contextlib.suppress(Exception):
                         value = field.convertCompatible(value)
-                    except Exception:
-                        pass
                     feat.setAttribute(i, value)
             feats.append(feat)
         mem.dataProvider().addFeatures(feats)

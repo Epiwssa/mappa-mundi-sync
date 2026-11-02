@@ -1,7 +1,8 @@
+import contextlib
 import os
 import time
 
-from qgis.core import QgsProject, QgsRasterLayer, QgsSettings
+from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsSettings
 from qgis.PyQt.QtCore import QRectF, Qt, QTime, QTimer
 from qgis.PyQt.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import (
@@ -94,10 +95,8 @@ class MapperSyncPlugin:
         self.backend.unwatch_project()
         project = QgsProject.instance()
         for sig in (project.layersAdded, project.layersRemoved, project.readProject):
-            try:
+            with contextlib.suppress(TypeError):  # already disconnected
                 sig.disconnect(self._refresh_layers)
-            except TypeError:
-                pass
         self.iface.removePluginMenu("Mappa Mundi Sync", self.action)
         self.iface.removeToolBarIcon(self.action)
         if self.dock:
@@ -220,8 +219,8 @@ class MapperSyncPlugin:
                 self.log_list.takeItem(self.log_list.count() - 1)
         try:
             self.invoker.call(add, timeout=5)
-        except Exception:
-            pass
+        except Exception as e:  # GUI busy or closing: keep the message in the QGIS log instead
+            QgsMessageLog.logMessage(f"{msg} ({e})", "Mappa Mundi Sync", Qgis.Info)
 
     def _refresh_layers(self, *_):
         if not self.dock:

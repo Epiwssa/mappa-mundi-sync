@@ -4,6 +4,7 @@ Every public method is safe to call from a server worker thread: QGIS work is
 pushed onto the main thread through the invoker.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -284,7 +285,8 @@ def geometry_kind(layer):
 def feature_hash(feature):
     """Short fingerprint of a feature's attributes and geometry, used to spot
     features changed in QGIS after a phone downloaded them."""
-    h = hashlib.md5()
+    # A change detector, not security: MD5 keeps hashes identical to those phones already hold.
+    h = hashlib.md5(usedforsecurity=False)
     for value in feature.attributes():
         h.update(repr(value).encode("utf-8", "replace"))
         h.update(b"\x1f")
@@ -330,10 +332,8 @@ class ProjectBackend:
 
     def unwatch_project(self):
         for sig, slot in self._project_slots:
-            try:
+            with contextlib.suppress(TypeError):  # already disconnected
                 sig.disconnect(slot)
-            except TypeError:
-                pass
         self._project_slots = []
 
     def _on_structure_signal(self, *_):
