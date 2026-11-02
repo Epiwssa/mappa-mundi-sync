@@ -17,9 +17,9 @@ app = QgsApplication([], False)
 app.initQgis()
 QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
 
-from mapper_sync.backend import ProjectBackend, layer_mode  # noqa: E402
-from mapper_sync.packager import RasterPackager, estimate_tiles, suggested_max_zoom  # noqa: E402
-from mapper_sync.server import MainThreadInvoker  # noqa: E402
+from mappa_mundi_sync.backend import ProjectBackend, layer_mode  # noqa: E402
+from mappa_mundi_sync.packager import RasterPackager, estimate_tiles, suggested_max_zoom  # noqa: E402
+from mappa_mundi_sync.server import MainThreadInvoker  # noqa: E402
 
 
 def make_ortho(path):

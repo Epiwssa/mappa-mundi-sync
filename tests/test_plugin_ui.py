@@ -46,12 +46,12 @@ class StubIface:
         pass
 
 
-import mapper_sync  # noqa: E402
+import mappa_mundi_sync  # noqa: E402
 
 folder = tempfile.mkdtemp(prefix="mapper_ui_")
 QgsProject.instance().write(os.path.join(folder, "ui.qgz"))
 iface = StubIface()
-plugin = mapper_sync.classFactory(iface)
+plugin = mappa_mundi_sync.classFactory(iface)
 plugin.initGui()
 
 pts = QgsVectorLayer("Point?crs=EPSG:4326&field=name:string", "Pts", "memory")
@@ -96,7 +96,7 @@ assert plugin.device_list.count() == 1 and "Survey Phone" in plugin.device_list.
 row = modes.index("edit")
 combo = plugin.layer_table.cellWidget(row, 1)
 combo.setCurrentIndex(combo.findData("view"))
-from mapper_sync.backend import layer_mode  # noqa: E402
+from mappa_mundi_sync.backend import layer_mode  # noqa: E402
 assert layer_mode(pts) == "view"
 
 plugin.unload()

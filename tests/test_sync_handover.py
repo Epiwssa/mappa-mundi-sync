@@ -20,8 +20,8 @@ from qgis.PyQt.QtCore import QTimer  # noqa: E402
 app = QgsApplication([], False)
 app.initQgis()
 
-from mapper_sync.backend import ProjectBackend  # noqa: E402
-from mapper_sync.server import MainThreadInvoker, SyncServer  # noqa: E402
+from mappa_mundi_sync.backend import ProjectBackend  # noqa: E402
+from mappa_mundi_sync.server import MainThreadInvoker, SyncServer  # noqa: E402
 
 PORT = 18769
 MOBILE = os.path.join(os.path.dirname(__file__), "..", "..", "mobile")

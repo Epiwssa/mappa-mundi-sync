@@ -12,7 +12,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("qr", os.path.join(HERE, "..", "mapper_sync", "qrcode.py"))
+spec = importlib.util.spec_from_file_location("qr", os.path.join(HERE, "..", "mappa_mundi_sync", "qrcode.py"))
 qr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qr)
 

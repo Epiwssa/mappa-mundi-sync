@@ -4,8 +4,8 @@ param([string]$Profile = "default")
 
 $plugins = Join-Path $env:APPDATA "QGIS\QGIS3\profiles\$Profile\python\plugins"
 New-Item -ItemType Directory -Force $plugins | Out-Null
-$target = Join-Path $plugins "mapper_sync"
-$source = Join-Path $PSScriptRoot "mapper_sync"
+$target = Join-Path $plugins "mappa_mundi_sync"
+$source = Join-Path $PSScriptRoot "mappa_mundi_sync"
 
 if (Test-Path $target) {
     Write-Host "Already installed at $target"

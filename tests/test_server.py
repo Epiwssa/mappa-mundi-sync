@@ -35,8 +35,8 @@ from qgis.PyQt.QtCore import QTimer, QVariant  # noqa: E402
 app = QgsApplication([], False)
 app.initQgis()
 
-from mapper_sync.backend import ProjectBackend  # noqa: E402
-from mapper_sync.server import MainThreadInvoker, SyncServer, pairing_url  # noqa: E402
+from mappa_mundi_sync.backend import ProjectBackend  # noqa: E402
+from mappa_mundi_sync.server import MainThreadInvoker, SyncServer, pairing_url  # noqa: E402
 
 PORT = 18765
 BASE = f"http://127.0.0.1:{PORT}"
