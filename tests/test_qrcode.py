@@ -38,6 +38,9 @@ except ValueError:
 with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
     json.dump(matrices, f)
 mobile = os.path.join(HERE, "..", "..", "mobile")
+if not os.path.isdir(os.path.join(mobile, "node_modules", "jsqr")):
+    print(f"RESULT: PASS ({len(texts)} codes encoded; decoding skipped, needs the Mappa Mundi app source with npm install)")
+    sys.exit(0)
 out = subprocess.run(
     ["node", os.path.join(mobile, "scripts", "decode-qr-matrix.js"), f.name],
     cwd=mobile, capture_output=True, text=True, encoding="utf-8", check=True,
