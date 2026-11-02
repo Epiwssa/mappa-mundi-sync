@@ -18,7 +18,7 @@ To install from source, copy (or link) the `mappa_mundi_sync` folder into your Q
 
 ## Use
 
-1. Open a project and click the phone icon on the toolbar.
+1. Open a project and click the Mappa Mundi (MM map) icon on the toolbar.
 2. Press **Start sync server**.
 3. In the Mappa Mundi app, tap **Connect to QGIS → Scan QR code**.
 4. Choose per layer whether phones can edit it, view it, or not see it at all.

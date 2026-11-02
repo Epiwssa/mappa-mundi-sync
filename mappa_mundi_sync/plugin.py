@@ -70,7 +70,7 @@ class MapperSyncPlugin:
     # --- QGIS plugin lifecycle -------------------------------------------
 
     def initGui(self):
-        self.action = QAction(QIcon(os.path.join(HERE, "icon.svg")), "Mappa Mundi Sync", self.iface.mainWindow())
+        self.action = QAction(QIcon(os.path.join(HERE, "icon.png")), "Mappa Mundi Sync", self.iface.mainWindow())
         self.action.setCheckable(True)
         self.action.toggled.connect(self._toggle_dock)
         self.iface.addToolBarIcon(self.action)

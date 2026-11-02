@@ -3,18 +3,19 @@ name=Mappa Mundi Sync
 qgisMinimumVersion=3.28
 description=Sync a QGIS project to the Mappa Mundi field app over local Wi-Fi.
 about=Runs a small sync server on this computer. The Mappa Mundi phone app downloads layers, styles and offline raster tiles, and pushes field edits and photos back into the project's layers. Phones pair by scanning a QR code; no cloud account is needed. Requires the Mappa Mundi app on an Android phone on the same network.
-version=0.2.2
+version=0.2.3
 author=Epiwssa
 email=mappa.mundi00@gmail.com
 homepage=https://github.com/Epiwssa/mappa-mundi-sync
 repository=https://github.com/Epiwssa/mappa-mundi-sync
 tracker=https://github.com/Epiwssa/mappa-mundi-sync/issues
-icon=icon.svg
+icon=icon.png
 category=Plugins
 experimental=True
 supportsQt6=True
 tags=field,mobile,sync,survey,gnss,offline,android
-changelog=0.2.2 - Qt6 ready: fully scoped Qt and QGIS enums.
+changelog=0.2.3 - New icon matching the Mappa Mundi app.
+    0.2.2 - Qt6 ready: fully scoped Qt and QGIS enums.
     0.2.1 - Security scan clean-up: no silent error handling, MD5 marked as non-security, documented LAN listening.
     0.2.0 - Survey-grade GPS attributes (gnss_* fields added automatically), layers created on phones are added to the project, renamed to Mappa Mundi Sync.
     0.1.0 - First release: Wi-Fi sync, QR pairing, offline raster tiles, photo upload.
