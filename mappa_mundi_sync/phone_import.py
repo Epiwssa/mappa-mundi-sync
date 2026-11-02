@@ -29,9 +29,9 @@ _TYPES = {
     "datetime": QVariant.DateTime,
 }
 _GEOMS = {
-    "Point": QgsWkbTypes.MultiPoint,
-    "LineString": QgsWkbTypes.MultiLineString,
-    "Polygon": QgsWkbTypes.MultiPolygon,
+    "Point": QgsWkbTypes.Type.MultiPoint,
+    "LineString": QgsWkbTypes.Type.MultiLineString,
+    "Polygon": QgsWkbTypes.Type.MultiPolygon,
 }
 
 
@@ -134,10 +134,10 @@ def import_phone_layers(payload):
         opts.driverName = "GPKG"
         opts.layerName = table
         opts.actionOnExistingFile = (
-            QgsVectorFileWriter.CreateOrOverwriteLayer if os.path.exists(gpkg) else QgsVectorFileWriter.CreateOrOverwriteFile
+            QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer if os.path.exists(gpkg) else QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteFile
         )
         err, msg, *_ = QgsVectorFileWriter.writeAsVectorFormatV3(mem, gpkg, QgsCoordinateTransformContext(), opts)
-        if err != QgsVectorFileWriter.NoError:
+        if err != QgsVectorFileWriter.WriterError.NoError:
             raise RuntimeError(f"Couldn't write {table}: {msg}")
 
         layer = QgsVectorLayer(source, spec.get("name") or table, "ogr")

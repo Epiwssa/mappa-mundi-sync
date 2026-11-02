@@ -36,7 +36,7 @@ HERE = os.path.dirname(__file__)
 def qr_pixmap(text, module_px=5, quiet=4):
     matrix = qr_encode(text)
     n = len(matrix) + quiet * 2
-    image = QImage(n * module_px, n * module_px, QImage.Format_RGB32)
+    image = QImage(n * module_px, n * module_px, QImage.Format.Format_RGB32)
     image.fill(QColor("white"))
     painter = QPainter(image)
     for y, row in enumerate(matrix):
@@ -135,11 +135,11 @@ class MapperSyncPlugin:
         row.addWidget(self.start_btn, 1)
         bl.addLayout(row)
         self.status_label = QLabel("Server stopped.")
-        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_label.setWordWrap(True)
         bl.addWidget(self.status_label)
         self.qr_label = QLabel()
-        self.qr_label.setAlignment(Qt.AlignCenter)
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setVisible(False)
         self.qr_label.setToolTip("Scan with the Mappa Mundi app: Connect > Scan QR code")
         bl.addWidget(self.qr_label)
@@ -163,7 +163,7 @@ class MapperSyncPlugin:
         bl = QVBoxLayout(box)
         self.layer_table = QTableWidget(0, 2)
         self.layer_table.setHorizontalHeaderLabels(["Layer", "On phone"])
-        self.layer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.layer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.layer_table.verticalHeader().setVisible(False)
         bl.addWidget(self.layer_table)
         layout.addWidget(box, 1)
@@ -208,7 +208,7 @@ class MapperSyncPlugin:
         layout.addWidget(self.log_list)
 
         self.dock.setWidget(root)
-        self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+        self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
         self.dock.hide()
 
     def _log(self, msg):
@@ -220,7 +220,7 @@ class MapperSyncPlugin:
         try:
             self.invoker.call(add, timeout=5)
         except Exception as e:  # GUI busy or closing: keep the message in the QGIS log instead
-            QgsMessageLog.logMessage(f"{msg} ({e})", "Mappa Mundi Sync", Qgis.Info)
+            QgsMessageLog.logMessage(f"{msg} ({e})", "Mappa Mundi Sync", Qgis.MessageLevel.Info)
 
     def _refresh_layers(self, *_):
         if not self.dock:
@@ -230,7 +230,7 @@ class MapperSyncPlugin:
         self.layer_table.setRowCount(len(layers))
         for row, layer in enumerate(layers):
             item = QTableWidgetItem(layer.name())
-            item.setFlags(Qt.ItemIsEnabled)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.layer_table.setItem(row, 0, item)
             combo = QComboBox()
             for mode in allowed_modes(layer):

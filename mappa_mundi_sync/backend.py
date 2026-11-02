@@ -76,7 +76,7 @@ def can_edit(layer):
         return False
     caps = layer.dataProvider().capabilities()
     flag = getattr(getattr(Qgis, "VectorProviderCapability", None), "AddFeatures", None)
-    return bool(caps & (flag if flag is not None else QgsVectorDataProvider.AddFeatures))
+    return bool(caps & (flag if flag is not None else QgsVectorDataProvider.Capability.AddFeatures))
 
 
 def default_mode(layer):
@@ -131,7 +131,7 @@ def symbol_style(symbol, geom_type):
         style["stroke"] = style.pop("fill")
         style["strokeWidth"] = max(1.0, symbol.width() * MM_TO_PX)
     else:
-        if sl is not None and hasattr(sl, "brushStyle") and _int(sl.brushStyle()) == 0:  # Qt.NoBrush
+        if sl is not None and hasattr(sl, "brushStyle") and _int(sl.brushStyle()) == 0:  # Qt.BrushStyle.NoBrush
             style["fillOpacity"] = 0
         style["stroke"] = _color(stroke()) if stroke else style["fill"]
         style["strokeWidth"] = max(0.5, stroke_width() * MM_TO_PX) if stroke_width else 1.0
@@ -228,7 +228,7 @@ def form_fields(layer):
             "type": ftype,
             "widget": "text",
             "readOnly": idx in pk or _int(layer.fields().fieldOrigin(idx)) != ORIGIN_PROVIDER,
-            "notNull": bool(field.constraints().constraints() & QgsFieldConstraints.ConstraintNotNull),
+            "notNull": bool(field.constraints().constraints() & QgsFieldConstraints.Constraint.ConstraintNotNull),
         }
         if wtype == "ValueMap":
             spec["widget"] = "select"
@@ -663,7 +663,7 @@ class ProjectBackend:
             return
         provider = layer.dataProvider()
         flag = getattr(getattr(Qgis, "VectorProviderCapability", None), "AddAttributes", None)
-        if not provider.capabilities() & (flag if flag is not None else QgsVectorDataProvider.AddAttributes):
+        if not provider.capabilities() & (flag if flag is not None else QgsVectorDataProvider.Capability.AddAttributes):
             return  # e.g. a read-only format: the values are dropped as before
         fields = []
         for name in missing:

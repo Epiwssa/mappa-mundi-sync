@@ -80,7 +80,7 @@ def tile_bounds(z, x, y):
 
 class TileRenderTask(QgsTask):
     def __init__(self, layer, out_dir, zmin, zmax, fmt):
-        super().__init__(f"Mappa Mundi: offline tiles for {layer.name()}", QgsTask.CanCancel)
+        super().__init__(f"Mappa Mundi: offline tiles for {layer.name()}", QgsTask.Flag.CanCancel)
         self.out_dir = out_dir
         self.fmt = fmt
         self.ranges = tile_ranges(_to_wgs84(layer), zmin, zmax)
@@ -94,7 +94,7 @@ class TileRenderTask(QgsTask):
         s.setTransformContext(QgsProject.instance().transformContext())
         s.setOutputDpi(96)
         s.setBackgroundColor(QColor(255, 255, 255) if fmt == "jpg" else QColor(0, 0, 0, 0))
-        s.setFlag(QgsMapSettings.Antialiasing, True)
+        s.setFlag(QgsMapSettings.Flag.Antialiasing, True)
         self.settings = s
 
     def run(self):
@@ -117,7 +117,7 @@ class TileRenderTask(QgsTask):
         settings.setExtent(QgsRectangle(tl.xMinimum(), br.yMinimum(), br.xMaximum(), tl.yMaximum()))
         settings.setOutputSize(QSize(TILE * META, TILE * META))
 
-        image = QImage(TILE * META, TILE * META, QImage.Format_ARGB32_Premultiplied)
+        image = QImage(TILE * META, TILE * META, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(self.settings.backgroundColor())
         painter = QPainter(image)
         job = QgsMapRendererCustomPainterJob(settings, painter)
@@ -133,7 +133,7 @@ class TileRenderTask(QgsTask):
                 folder = os.path.join(self.out_dir, str(z), str(x))
                 os.makedirs(folder, exist_ok=True)
                 if self.fmt == "jpg":
-                    tile.convertToFormat(QImage.Format_RGB32).save(os.path.join(folder, f"{y}.jpg"), "JPG", 82)
+                    tile.convertToFormat(QImage.Format.Format_RGB32).save(os.path.join(folder, f"{y}.jpg"), "JPG", 82)
                 else:
                     tile.save(os.path.join(folder, f"{y}.png"), "PNG")
                 self.written += 1
