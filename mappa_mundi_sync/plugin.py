@@ -1,6 +1,7 @@
 import contextlib
 import os
 import time
+from urllib.parse import quote
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsSettings
 from qgis.PyQt.QtCore import QRectF, Qt, QTime, QTimer
@@ -31,6 +32,17 @@ from .qrcode import encode as qr_encode
 from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addresses, new_pin, pairing_url
 
 HERE = os.path.dirname(__file__)
+
+# While the app is in Google Play testing: the opt-in page works for people on the tester list,
+# everyone else can ask to be added by email.
+APP_TESTING_URL = "https://play.google.com/apps/testing/com.epiwssa.mappamundi"
+ACCESS_EMAIL = "mrepiwssa@gmail.com"
+ACCESS_MAILTO = "mailto:{}?subject={}&body={}".format(
+    ACCESS_EMAIL,
+    quote("Mappa Mundi tester request"),
+    quote("Hi, please add me as a tester for the Mappa Mundi app.\n\n"
+          "The Google account (Gmail) I use on my Android phone is: \n"),
+)
 
 
 def qr_pixmap(text, module_px=5, quiet=4):
@@ -120,6 +132,23 @@ class MapperSyncPlugin:
         self.dock.visibilityChanged.connect(lambda v: self.action.setChecked(v))
         root = QWidget()
         layout = QVBoxLayout(root)
+
+        # Getting the phone app
+        app_row = QHBoxLayout()
+        app_label = QLabel(
+            f'Need the phone app? Android, in testing: <a href="{APP_TESTING_URL}">join the test</a>'
+            f' or <a href="{ACCESS_MAILTO}">ask for access</a> ({ACCESS_EMAIL}).'
+        )
+        app_label.setWordWrap(True)
+        app_label.setOpenExternalLinks(True)
+        app_label.setToolTip("The test page only works once you're on the tester list. "
+                             "If it says the app isn't available, ask for access by email.")
+        app_qr_btn = QPushButton("QR")
+        app_qr_btn.setToolTip("Show the test link as a QR code to scan with the phone")
+        app_qr_btn.clicked.connect(self._show_app_qr)
+        app_row.addWidget(app_label, 1)
+        app_row.addWidget(app_qr_btn)
+        layout.addLayout(app_row)
 
         # Server
         box = QGroupBox("Phone connection")
@@ -266,6 +295,20 @@ class MapperSyncPlugin:
             self._show_connection()
         self._show_pin()
         self._log("New PIN created; phones must scan the QR code again")
+
+    def _show_app_qr(self):
+        box = QMessageBox(self.dock)
+        box.setWindowTitle("Get the Mappa Mundi app")
+        box.setIconPixmap(qr_pixmap(APP_TESTING_URL, module_px=6))
+        box.setText(
+            "Scan with the Android phone's camera to open the Google Play test page.<br><br>"
+            "If it says the app isn't available, you're not on the tester list yet: "
+            f'<a href="{ACCESS_MAILTO}">ask for access</a> at {ACCESS_EMAIL} '
+            "and include the Gmail address you use on the phone."
+        )
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        box.exec()
 
     def _show_connection(self):
         port = self.server.port
