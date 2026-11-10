@@ -5,7 +5,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-# The test saves a port and PIN through QgsSettings; keep them out of the real QGIS profile.
+# The test saves a port and pairing code through QgsSettings; keep them out of the real QGIS profile.
 os.environ["QGIS_CUSTOM_CONFIG_PATH"] = tempfile.mkdtemp(prefix="mapper_ui_cfg_")
 
 from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer  # noqa: E402
@@ -74,10 +74,11 @@ assert plugin.raster_combo.count() == 1
 
 plugin.port_spin.setValue(18766)
 plugin._toggle_server()
-assert plugin.server and plugin.server.running and "PIN" in plugin.status_label.text()
-pin = plugin.server.pin
+assert plugin.server and plugin.server.running and plugin.server.code in plugin.status_label.text()
+pin = plugin.server.code
+assert "&c=" + pin in plugin.pairing, plugin.pairing
 assert plugin.qr_label.isVisibleTo(plugin.dock) and not plugin.qr_label.pixmap().isNull()
-assert pin in plugin.pin_label.text()
+assert pin in plugin.code_label.text()
 
 # The panel scrolls rather than forcing QGIS taller than the screen.
 assert plugin.dock.minimumSizeHint().height() < 300, plugin.dock.minimumSizeHint()
@@ -98,15 +99,15 @@ if shot:
     plugin.dock.widget().resize(380, 900)
     plugin.dock.widget().grab().save(shot)
 
-# The PIN survives a server restart (phones stay paired)...
+# The pairing code survives a server restart (phones stay paired)...
 plugin._toggle_server()
 assert plugin.server is None and plugin.start_btn.text() == "Start sync server"
 assert not plugin.qr_label.isVisibleTo(plugin.dock) and not plugin.qr_size_row.isVisibleTo(plugin.dock)
 plugin._toggle_server()
-assert plugin.server.pin == pin, "PIN should persist between server runs"
+assert plugin.server.code == pin, "the pairing code should persist between server runs"
 # ...until the user asks for a new one, which applies to the running server immediately.
-plugin._new_pin()
-assert plugin.server.pin != pin and plugin.server.pin in plugin.status_label.text()
+plugin._new_code()
+assert plugin.server.code != pin and plugin.server.code in plugin.status_label.text()
 plugin._toggle_server()
 
 # Phones appear in the "Phones seen" list.
@@ -189,5 +190,5 @@ plugin._clear_area()
 assert plugin.area is None and load_area(QgsProject.instance()) is None and "whole project" in plugin.area_label.text()
 
 plugin.unload()
-print("RESULT: PASS (pin was", pin + ")")
+print("RESULT: PASS (pairing code was", pin + ")")
 app.exitQgis()

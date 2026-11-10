@@ -10,7 +10,6 @@ import sys
 import tempfile
 import threading
 import traceback
-import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -21,6 +20,7 @@ app = QgsApplication([], False)
 app.initQgis()
 
 from mappa_mundi_sync.backend import ProjectBackend, layer_mode  # noqa: E402
+import sealed_client  # noqa: E402
 from mappa_mundi_sync.server import MainThreadInvoker, SyncServer  # noqa: E402
 
 PORT = 18768
@@ -28,7 +28,7 @@ folder = tempfile.mkdtemp(prefix="mapper_phone_")
 QgsProject.instance().write(os.path.join(folder, "farm.qgz"))
 backend = ProjectBackend(MainThreadInvoker())
 backend.watch_project()
-server = SyncServer(backend, port=PORT, pin="135790")
+server = SyncServer(backend, port=PORT)
 server.start()
 outcome = {}
 
@@ -62,10 +62,9 @@ tracks = {
 
 
 def post(payload):
-    r = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/import", data=json.dumps(payload).encode(), method="POST",
-                               headers={"Content-Type": "application/json", "X-Mapper-Pin": server.pin})
-    with urllib.request.urlopen(r, timeout=60) as resp:
-        return json.loads(resp.read())
+    status, res = sealed_client.request(f"http://127.0.0.1:{PORT}", "POST", "/api/import", payload, key=server.key)
+    assert status == 200, res
+    return res
 
 
 def scenario():

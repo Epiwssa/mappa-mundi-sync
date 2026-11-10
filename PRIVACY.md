@@ -21,7 +21,7 @@ All of this is processed on your phone. It leaves the phone only as described in
 
 ## Where data goes
 
-- **Your QGIS computer:** when you pair the app with QGIS, it exchanges project data, edits and photos with that computer over your local network. The connection is protected by a PIN. That computer is yours, or belongs to whoever runs the QGIS project, and is not operated by Epiwssa.
+- **Your QGIS computer:** when you pair the app with QGIS, it exchanges project data, edits and photos with that computer over your local network. Everything sent between the phone and that computer is encrypted (AES-GCM) with a key from the pairing QR code, so others on the same network can't read or change it. That computer is yours, or belongs to whoever runs the QGIS project, and is not operated by Epiwssa.
 - **Map tile servers:** to show online basemaps, the app downloads map tiles from the tile servers set in your project (by default OpenStreetMap). Like any web request, these servers can see your IP address and which map area is being viewed. Their own privacy policies apply, for example https://osmfoundation.org/wiki/Privacy_Policy.
 - **Sharing you start:** if you choose to send a project or file, for example with WhatsApp, Bluetooth or email, it goes wherever you send it.
 

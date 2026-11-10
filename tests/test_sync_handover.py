@@ -31,7 +31,7 @@ folder = tempfile.mkdtemp(prefix="mapper_handover_")
 QgsProject.instance().write(os.path.join(folder, "site.qgz"))
 backend = ProjectBackend(MainThreadInvoker())
 backend.watch_project()
-server = SyncServer(backend, port=PORT, pin="864200")
+server = SyncServer(backend, port=PORT)
 server.start()
 outcome = {}
 
@@ -39,7 +39,7 @@ outcome = {}
 def run_client():
     try:
         proc = subprocess.run(
-            [NODE, os.path.join(MOBILE, "scripts", "sync-integration.js"), str(PORT), server.pin, "site"],
+            [NODE, os.path.join(MOBILE, "scripts", "sync-integration.js"), str(PORT), server.code, "site"],
             cwd=MOBILE, capture_output=True, text=True, encoding="utf-8", timeout=120,
         )
         outcome["code"] = proc.returncode

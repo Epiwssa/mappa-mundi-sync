@@ -2,7 +2,7 @@
 
 A QGIS plugin that syncs the open project to the **Mappa Mundi** field app on an Android phone over local Wi-Fi. No cloud account is needed.
 
-- **Pairing:** phones pair by scanning a QR code shown in the plugin panel. The connection is protected by a PIN.
+- **Pairing:** phones pair by scanning a QR code shown in the plugin panel. Everything between phones and QGIS is encrypted (AES-GCM) with the key in that QR code.
 - **To the phone:** vector layers with their styles and forms, online basemaps, and rasters rendered as offline tiles.
 - **Back to QGIS:** new, edited and deleted features and photos are written into the real layers (GeoPackage, PostGIS, shapefile and others). Conflicting edits are detected.
 - **Phone-made layers:** layers and GPS tracks created on a phone are saved to a GeoPackage next to the project and added to it.

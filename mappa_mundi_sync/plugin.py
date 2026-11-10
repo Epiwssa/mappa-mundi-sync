@@ -35,7 +35,8 @@ from .area import FieldArea, layer_in_area, load_area, save_area
 from .backend import MAX_PHONE_FEATURES, MODE_LABELS, ProjectBackend, allowed_modes, default_mode, layer_mode, safe_name, set_layer_mode
 from .packager import RasterPackager, estimate_tiles, suggested_max_zoom
 from .qrcode import encode as qr_encode
-from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addresses, new_pin, pairing_url
+from .secure import code_to_key, key_to_code, new_key
+from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addresses, pairing_url
 
 HERE = os.path.dirname(__file__)
 
@@ -80,14 +81,14 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 
-def saved_pin():
-    """The PIN stays the same between QGIS sessions so paired phones keep working."""
+def saved_key():
+    """The pairing key stays the same between QGIS sessions so paired phones keep working."""
     settings = QgsSettings()
-    pin = settings.value("mapper_sync/pin", "")
-    if not (isinstance(pin, str) and len(pin) == 6 and pin.isdigit()):
-        pin = new_pin()
-        settings.setValue("mapper_sync/pin", pin)
-    return pin
+    key = code_to_key(settings.value("mapper_sync/pairing_code", ""))
+    if key is None:
+        key = new_key()
+        settings.setValue("mapper_sync/pairing_code", key_to_code(key))
+    return key
 
 
 class MapperSyncPlugin:
@@ -237,19 +238,22 @@ class MapperSyncPlugin:
         bl.addWidget(self.qr_size_row)
         self.pairing = None  # pairing URL in the QR code while the server runs
         pin_row = QHBoxLayout()
-        self.pin_label = QLabel()
-        self.new_pin_btn = QPushButton("New PIN")
-        self.new_pin_btn.setToolTip("Phones paired with the old PIN will need to scan the new QR code")
-        self.new_pin_btn.clicked.connect(self._new_pin)
-        pin_row.addWidget(self.pin_label, 1)
-        pin_row.addWidget(self.new_pin_btn)
+        self.code_label = QLabel()
+        self.code_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.code_label.setToolTip("Encrypts everything between phones and this computer. "
+                                   "Type it in the app under Enter address manually, or scan the QR code.")
+        self.new_code_btn = QPushButton("New code")
+        self.new_code_btn.setToolTip("Phones paired with the old code will need to scan the new QR code")
+        self.new_code_btn.clicked.connect(self._new_code)
+        pin_row.addWidget(self.code_label, 1)
+        pin_row.addWidget(self.new_code_btn)
         bl.addLayout(pin_row)
         self.device_list = QListWidget()
         self.device_list.setMaximumHeight(90)
         bl.addWidget(QLabel("Phones seen"))
         bl.addWidget(self.device_list)
         layout.addWidget(box)
-        self._show_pin()
+        self._show_code()
 
         # Layers
         box = QGroupBox("Layers shared with the phone")
@@ -534,17 +538,17 @@ class MapperSyncPlugin:
             return self.area
         return None
 
-    def _show_pin(self):
-        self.pin_label.setText(f"PIN: <b>{saved_pin()}</b>")
+    def _show_code(self):
+        self.code_label.setText(f"Pairing code: <b>{key_to_code(saved_key())}</b>")
 
-    def _new_pin(self):
-        pin = new_pin()
-        QgsSettings().setValue("mapper_sync/pin", pin)
+    def _new_code(self):
+        key = new_key()
+        QgsSettings().setValue("mapper_sync/pairing_code", key_to_code(key))
         if self.server:
-            self.server.pin = pin
+            self.server.key = key
             self._show_connection()
-        self._show_pin()
-        self._log("New PIN created; phones must scan the QR code again")
+        self._show_code()
+        self._log("New pairing code created; phones must scan the QR code again")
 
     def _show_app_qr(self):
         box = QMessageBox(self.dock)
@@ -580,7 +584,7 @@ class MapperSyncPlugin:
         image.setPixmap(qr_pixmap(self.pairing, size=size))
         image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(image)
-        text = QLabel(f"In the Mappa Mundi app tap <b>Scan QR code</b>. PIN <b>{self.server.pin}</b>")
+        text = QLabel(f"In the Mappa Mundi app tap <b>Scan QR code</b>.<br>Pairing code <b>{self.server.code}</b>")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(text)
         dialog.exec()
@@ -588,14 +592,14 @@ class MapperSyncPlugin:
     def _show_connection(self):
         port = self.server.port
         ips = local_ip_addresses()
-        self.pairing = pairing_url(ips, port, self.server.pin, QgsProject.instance().baseName())
+        self.pairing = pairing_url(ips, port, self.server.code, QgsProject.instance().baseName())
         self._render_qr()
         self.qr_label.setVisible(True)
         self.qr_size_row.setVisible(True)
         addresses = ", ".join(f"<b>{ip}:{port}</b>" for ip in ips)
         self.status_label.setText(
             f"Running. In the Mappa Mundi app tap <b>Scan QR code</b>, or enter {addresses} "
-            f"and PIN <b>{self.server.pin}</b>.<br>"
+            f"and pairing code <b>{self.server.code}</b>.<br>"
             "<small>Phone and PC must be on the same Wi-Fi. If the phone can't connect, "
             "allow QGIS through Windows Firewall for private networks.</small>"
         )
@@ -652,7 +656,7 @@ class MapperSyncPlugin:
     def _start_server(self):
         port = self.port_spin.value()
         QgsSettings().setValue("mapper_sync/port", port)
-        self.server = SyncServer(self.backend, port=port, pin=saved_pin(), log=self._log)
+        self.server = SyncServer(self.backend, port=port, key=saved_key(), log=self._log)
         try:
             self.server.start()
         except OSError as e:
