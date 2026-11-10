@@ -138,6 +138,55 @@ for path in pngs:
     img = QImage(path)
     alphas = {img.pixelColor(x, y).alpha() for x in range(0, 256, 8) for y in range(0, 256, 8)}
     assert 0 in alphas and 255 in alphas, (path, sorted(alphas)[:5])
+# A style that recalculates min/max for the visible extent must not give each block of tiles
+# its own colour stretch (visible seams on the phone). The DEM is a smooth north-south slope.
+import numpy  # noqa: E402
+from qgis.core import (  # noqa: E402
+    Qgis,
+    QgsColorRampShader,
+    QgsRasterMinMaxOrigin,
+    QgsRasterShader,
+    QgsSingleBandPseudoColorRenderer,
+    QgsStyle,
+)
+from mappa_mundi_sync.packager import META, frozen_copy, tile_ranges  # noqa: E402
+
+dem_path = os.path.join(folder, "dem.tif")
+ds = gdal.GetDriverByName("GTiff").Create(dem_path, 200, 400, 1, gdal.GDT_Float32)
+ds.SetGeoTransform([600000, 10, 0, 7104000, 0, -10])
+ds.SetProjection(srs.ExportToWkt())
+ds.GetRasterBand(1).WriteArray(numpy.tile(numpy.linspace(1200, 1000, 400, dtype="float32")[:, None], (1, 200)))
+ds = None
+dem = QgsRasterLayer(dem_path, "DEM")
+ramp = QgsColorRampShader(1000, 1200, QgsStyle.defaultStyle().colorRamp("Spectral"))
+ramp.classifyColorRamp(10, 1)
+shader = QgsRasterShader()
+shader.setRasterShaderFunction(ramp)
+renderer = QgsSingleBandPseudoColorRenderer(dem.dataProvider(), 1, shader)
+origin = QgsRasterMinMaxOrigin()
+origin.setLimits(Qgis.RasterRangeLimit.MinimumMaximum)
+origin.setExtent(Qgis.RasterRangeExtent.UpdatedCanvas)
+renderer.setMinMaxOrigin(origin)
+dem.setRenderer(renderer)
+frozen = frozen_copy(dem)
+assert frozen.renderer().minMaxOrigin().limits() == Qgis.RasterRangeLimit.NotSet
+assert dem.renderer().minMaxOrigin().extent() == Qgis.RasterRangeExtent.UpdatedCanvas, "the user's style is untouched"
+
+z = 16
+x0, y0, x1, y1 = tile_ranges(clipped_bbox_wgs84(dem, None), z, z)[z]
+boundary = next(y for y in range(y0 + 1, y1) if y % META == 0)  # first tile row of a new block
+dem_out = os.path.join(folder, "dem_tiles")
+result = {}
+RasterPackager(dem, dem_out, z, z, "png", lambda ok, err: (result.update(ok=ok), app.quit())).start()
+app.exec()
+assert result.get("ok"), result
+x = (x0 + x1) // 2
+above = QImage(os.path.join(dem_out, str(z), str(x), f"{boundary - 1}.png")).pixelColor(128, 255)
+below = QImage(os.path.join(dem_out, str(z), str(x), f"{boundary}.png")).pixelColor(128, 0)
+jump = sum(abs(a - b) for a, b in zip(above.getRgb()[:3], below.getRgb()[:3]))
+print("colour change across a block boundary:", jump)
+assert jump < 30, (above.name(), below.name())
+
 # Phones only get the features in the field area, and oversized layers are left out, not sent.
 import mappa_mundi_sync.backend as backend_module  # noqa: E402
 from mappa_mundi_sync.area import count_in_area, features_in_area  # noqa: E402

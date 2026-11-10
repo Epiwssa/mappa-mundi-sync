@@ -16,6 +16,7 @@ import shutil
 import time
 
 from qgis.core import (
+    Qgis,
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
@@ -24,6 +25,7 @@ from qgis.core import (
     QgsMapRendererCustomPainterJob,
     QgsMapSettings,
     QgsProject,
+    QgsRasterMinMaxOrigin,
     QgsRectangle,
     QgsTask,
 )
@@ -51,6 +53,23 @@ def suggested_max_zoom(layer):
         return max(1, min(22, int(round(z))))
     except Exception:
         return 18
+
+
+def frozen_copy(layer):
+    """A copy of the layer whose colour stretch stays as QGIS shows it now.
+
+    Styles set to recalculate min/max for the visible extent would otherwise stretch
+    each block of tiles to its own values, leaving visible seams between blocks.
+    """
+    copy = layer.clone()
+    renderer = copy.renderer()
+    if renderer is not None and hasattr(renderer, "minMaxOrigin"):
+        limit = getattr(Qgis, "RasterRangeLimit", None)
+        not_set = limit.NotSet if limit is not None else QgsRasterMinMaxOrigin.Limits.None_
+        origin = QgsRasterMinMaxOrigin(renderer.minMaxOrigin())
+        origin.setLimits(not_set)
+        renderer.setMinMaxOrigin(origin)
+    return copy
 
 
 def _tile_xy(lon, lat, z):
@@ -95,8 +114,9 @@ class TileRenderTask(QgsTask):
         self.done = 0  # tiles dealt with, written or skipped
         self.error = None
         # Map settings are prepared on the main thread; only rendering runs in the task.
+        self.layer = frozen_copy(layer)  # kept alive for the task's lifetime
         s = QgsMapSettings()
-        s.setLayers([layer])
+        s.setLayers([self.layer])
         s.setDestinationCrs(WEB_MERCATOR)
         s.setTransformContext(QgsProject.instance().transformContext())
         s.setOutputDpi(96)
