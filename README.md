@@ -30,6 +30,10 @@ To install from source, copy (or link) the `mappa_mundi_sync` folder into your Q
   `"C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat" tests\test_server.py`
 - **Packaging:** `python package.py` builds `dist/mappa_mundi_sync-<version>.zip`, ready to upload to plugins.qgis.org.
 
+## Privacy
+
+The plugin and the Mappa Mundi app collect nothing for the developer. See [PRIVACY.md](PRIVACY.md).
+
 ## Licence
 
 GNU General Public License v2 or later. See [LICENSE](LICENSE).
