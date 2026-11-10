@@ -13,13 +13,14 @@ import glob
 import os
 import secrets
 import ssl
+import string
 import sys
 
 KEY_BYTES = 16
 NONCE_BYTES = 12
 TAG_BYTES = 16
-# Crockford base32: no I, L, O or U, so a code read aloud or typed is hard to get wrong.
-ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+# Crockford base32: digits and capitals without I, L, O or U, so a code read aloud or typed is hard to get wrong.
+ALPHABET = string.digits + "".join(c for c in string.ascii_uppercase if c not in "ILOU")
 _READ_AS = {"O": "0", "I": "1", "L": "1"}
 
 _EVP_CTRL_GCM_SET_IVLEN = 0x9

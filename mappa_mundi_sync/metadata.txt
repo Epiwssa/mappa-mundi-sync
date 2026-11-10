@@ -3,7 +3,7 @@ name=Mappa Mundi Sync
 qgisMinimumVersion=3.28
 description=Sync a QGIS project to the Mappa Mundi field app over local Wi-Fi.
 about=Runs a small sync server on this computer. The Mappa Mundi phone app downloads layers, styles and offline raster tiles, and pushes field edits and photos back into the project's layers. Phones pair by scanning a QR code; no cloud account is needed. Requires the Mappa Mundi app on an Android phone on the same network.
-version=0.3.0
+version=0.3.1
 author=Epiwssa
 email=mrepiwssa@gmail.com
 homepage=https://github.com/Epiwssa/mappa-mundi-sync
@@ -14,7 +14,8 @@ category=Plugins
 experimental=True
 supportsQt6=True
 tags=field,mobile,sync,survey,gnss,offline,android
-changelog=0.3.0 - Sync is encrypted (AES-GCM) with a pairing code that replaces the PIN. Needs Mappa Mundi app 1.2.0 or newer: re-pair phones by scanning the new QR code.
+changelog=0.3.1 - Pairing-code alphabet built from standard characters (no false secret-scan alarm).
+    0.3.0 - Sync is encrypted (AES-GCM) with a pairing code that replaces the PIN. Needs Mappa Mundi app 1.2.0 or newer: re-pair phones by scanning the new QR code.
     0.2.10 - Offline raster tiles keep one colour stretch (what QGIS shows when you build them), so styles that recalculate min/max per view no longer leave seams between blocks of tiles.
     0.2.9 - Offline raster tiles are drawn only inside the field area (edge tiles transparent), instead of filling whole tiles around it.
     0.2.8 - Fixes a crash with categorized styles that have an "all other values" class. Phones only get the features inside the field area, and layers too big for a phone (over 50,000 features) are left out instead of exhausting memory. The panel scrolls instead of stretching the QGIS window, and the QR code size can be changed or enlarged.
