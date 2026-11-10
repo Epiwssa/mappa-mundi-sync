@@ -17,7 +17,7 @@ All of this is processed on your phone. It leaves the phone only as described in
 - **Location:** while the app is open, it shows your position on the map and records the GPS points and tracks you choose to collect. It does not use location in the background.
 - **Camera and photos:** used to scan pairing QR codes and to take or attach photos of features.
 - **Map data and files:** the layers, features, attributes and files you open, create or edit.
-- **Phone name:** a name for your phone (by default its model name), shown in QGIS so you can tell paired phones apart.
+- **Phone name and app ID:** a name for your phone (by default its model name) and a random ID the app creates when first opened. They are sent with each sync so QGIS can tell paired phones apart. The ID is not your phone's hardware ID and is deleted when you uninstall the app.
 
 ## Where data goes
 
