@@ -29,7 +29,21 @@ Nothing else is sent anywhere. No data is sold or shared with third parties.
 
 ## Storage and deletion
 
-Data is stored in the app's private storage on your phone. To delete a project, remove it in the app. Uninstalling the app deletes all of its data from the phone. Data already synced to QGIS stays in the QGIS project until you delete it there.
+Mappa Mundi stores data only in the app's private storage on your phone. Epiwssa holds no copy, so there is nothing to request from us: you delete it yourself, straight away.
+
+**To delete one project from Mappa Mundi:**
+
+1. Open Mappa Mundi. The list "Projects on this phone" appears.
+2. Tap **⋯** next to the project.
+3. Tap **Delete**, then **Delete** again to confirm.
+
+This removes the project's features, attributes, photos, GPS tracks, offline map tiles and any edits not yet synced. It is deleted immediately and nothing is kept.
+
+**To delete everything:** uninstall Mappa Mundi, or go to Android **Settings → Apps → Mappa Mundi → Storage → Clear storage**. This deletes all projects and settings at once.
+
+**Data already synced to QGIS** is in your own (or your organisation's) QGIS project, not with Epiwssa. Delete it there in QGIS. **Map tile servers** such as OpenStreetMap follow their own retention policies.
+
+Questions: mrepiwssa@gmail.com
 
 ## Children
 
