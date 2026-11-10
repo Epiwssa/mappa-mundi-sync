@@ -3,6 +3,10 @@ phone can show it with no network.
 
 Rendering happens in a background QgsTask using metatiles (4x4 tiles per
 render) for speed and seamless labels/edges.
+
+With a field area, the raster is drawn only inside the area's shape: tiles wholly
+inside it are saved as usual, tiles cut by its edge as transparent PNG (the phone
+reads both), and tiles outside it are skipped.
 """
 
 import json
@@ -15,6 +19,8 @@ from qgis.core import (
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsGeometry,
+    QgsMapClippingRegion,
     QgsMapRendererCustomPainterJob,
     QgsMapSettings,
     QgsProject,
@@ -65,9 +71,9 @@ def tile_ranges(bbox_wgs84, zmin, zmax):
     return out
 
 
-def estimate_tiles(layer, zmin, zmax, clip=None):
-    """Tile count for the layer, cut to the clip box (WGS84) if given. None if they don't overlap."""
-    bbox = clipped_bbox_wgs84(layer, clip)
+def estimate_tiles(layer, zmin, zmax, area=None):
+    """Tile count for the layer, cut to the area's box if given. None if they don't overlap."""
+    bbox = clipped_bbox_wgs84(layer, area.bbox_wgs84() if area else None)
     if bbox is None:
         return None
     return sum((x1 - x0 + 1) * (y1 - y0 + 1) for x0, y0, x1, y1 in tile_ranges(bbox, zmin, zmax).values())
@@ -79,13 +85,14 @@ def tile_bounds(z, x, y):
 
 
 class TileRenderTask(QgsTask):
-    def __init__(self, layer, out_dir, zmin, zmax, fmt, bbox):
+    def __init__(self, layer, out_dir, zmin, zmax, fmt, bbox, clip=None):
         super().__init__(f"Mappa Mundi: offline tiles for {layer.name()}", QgsTask.Flag.CanCancel)
         self.out_dir = out_dir
         self.fmt = fmt
         self.ranges = tile_ranges(bbox, zmin, zmax)
         self.total = sum((r[2] - r[0] + 1) * (r[3] - r[1] + 1) for r in self.ranges.values())
         self.written = 0
+        self.done = 0  # tiles dealt with, written or skipped
         self.error = None
         # Map settings are prepared on the main thread; only rendering runs in the task.
         s = QgsMapSettings()
@@ -93,8 +100,13 @@ class TileRenderTask(QgsTask):
         s.setDestinationCrs(WEB_MERCATOR)
         s.setTransformContext(QgsProject.instance().transformContext())
         s.setOutputDpi(96)
-        s.setBackgroundColor(QColor(255, 255, 255) if fmt == "jpg" else QColor(0, 0, 0, 0))
+        s.setBackgroundColor(QColor(255, 255, 255) if fmt == "jpg" and clip is None else QColor(0, 0, 0, 0))
         s.setFlag(QgsMapSettings.Flag.Antialiasing, True)
+        self.clip = clip  # area outline in Web Mercator, or None
+        if clip is not None:
+            s.addClippingRegion(QgsMapClippingRegion(clip))
+            self.clip_engine = QgsGeometry.createGeometryEngine(clip.constGet())
+            self.clip_engine.prepareGeometry()
         self.settings = s
 
     def run(self):
@@ -110,8 +122,24 @@ class TileRenderTask(QgsTask):
             self.error = str(e)
             return False
 
+    def _coverage(self, z, x, y):
+        """'full', 'part' or 'none': how much of the tile the field area covers."""
+        if self.clip is None:
+            return "full"
+        tile = QgsGeometry.fromRect(tile_bounds(z, x, y))
+        if self.clip_engine.contains(tile.constGet()):
+            return "full"
+        return "part" if self.clip_engine.intersects(tile.constGet()) else "none"
+
     def _render_meta(self, z, mx, my, rng):
         x0, y0, x1, y1 = rng
+        tiles = [(mx + i, my + j) for i in range(META) for j in range(META)
+                 if x0 <= mx + i <= x1 and y0 <= my + j <= y1]
+        coverage = {xy: self._coverage(z, *xy) for xy in tiles}
+        if all(c == "none" for c in coverage.values()):
+            self.done += len(tiles)
+            self.setProgress(100.0 * self.done / max(1, self.total))
+            return
         tl, br = tile_bounds(z, mx, my), tile_bounds(z, mx + META - 1, my + META - 1)
         settings = QgsMapSettings(self.settings)
         settings.setExtent(QgsRectangle(tl.xMinimum(), br.yMinimum(), br.xMaximum(), tl.yMaximum()))
@@ -124,31 +152,36 @@ class TileRenderTask(QgsTask):
         job.renderSynchronously()
         painter.end()
 
-        for i in range(META):
-            for j in range(META):
-                x, y = mx + i, my + j
-                if not (x0 <= x <= x1 and y0 <= y <= y1):
-                    continue
-                tile = image.copy(QRect(i * TILE, j * TILE, TILE, TILE))
-                folder = os.path.join(self.out_dir, str(z), str(x))
-                os.makedirs(folder, exist_ok=True)
-                if self.fmt == "jpg":
-                    tile.convertToFormat(QImage.Format.Format_RGB32).save(os.path.join(folder, f"{y}.jpg"), "JPG", 82)
-                else:
-                    tile.save(os.path.join(folder, f"{y}.png"), "PNG")
-                self.written += 1
-        self.setProgress(100.0 * self.written / max(1, self.total))
+        for (x, y), cover in coverage.items():
+            self.done += 1
+            if cover == "none":
+                continue
+            tile = image.copy(QRect((x - mx) * TILE, (y - my) * TILE, TILE, TILE))
+            folder = os.path.join(self.out_dir, str(z), str(x))
+            os.makedirs(folder, exist_ok=True)
+            if self.fmt == "jpg" and cover == "full":
+                flat = QImage(TILE, TILE, QImage.Format.Format_RGB32)
+                flat.fill(QColor(255, 255, 255))
+                p = QPainter(flat)
+                p.drawImage(0, 0, tile)
+                p.end()
+                flat.save(os.path.join(folder, f"{y}.jpg"), "JPG", 82)
+            else:
+                tile.save(os.path.join(folder, f"{y}.png"), "PNG")
+            self.written += 1
+        self.setProgress(100.0 * self.done / max(1, self.total))
 
 
 class RasterPackager:
     """Builds the tile folder for one layer and writes mapper.json when done.
 
-    With a clip box (WGS84), only tiles inside it are made.
+    With a field area (clip), the raster is drawn only inside the area.
     """
 
     def __init__(self, layer, out_dir, zmin, zmax, fmt, on_done, on_progress=None, clip=None):
         self.layer = layer
-        self.bbox = clipped_bbox_wgs84(layer, clip)
+        self.bbox = clipped_bbox_wgs84(layer, clip.bbox_wgs84() if clip else None)
+        self.clip = clip.geometry_in(WEB_MERCATOR) if clip else None
         if self.bbox is None:
             raise ValueError(f"{layer.name()} doesn't overlap the chosen area")
         self.out_dir = out_dir
@@ -161,7 +194,7 @@ class RasterPackager:
         if os.path.isdir(self.out_dir):
             shutil.rmtree(self.out_dir)
         os.makedirs(self.out_dir)
-        self.task = TileRenderTask(self.layer, self.out_dir, self.zmin, self.zmax, self.fmt, self.bbox)
+        self.task = TileRenderTask(self.layer, self.out_dir, self.zmin, self.zmax, self.fmt, self.bbox, self.clip)
         if self.on_progress:
             self.task.progressChanged.connect(self.on_progress)
         self.task.taskCompleted.connect(lambda: self._finished(True))

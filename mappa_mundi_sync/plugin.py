@@ -526,13 +526,12 @@ class MapperSyncPlugin:
             self._update_estimate()
 
     def _raster_clip(self):
-        """WGS84 box that offline tiles are cut to, or None for the whole layer."""
+        """The area offline tiles are cut to, or None for the whole layer."""
         choice = self.extent_combo.currentData()
         if choice == "view":
-            view = self._canvas_area("map view")
-            return view.bbox_wgs84() if view else None
-        if choice == "area" and self.area:
-            return self.area.bbox_wgs84()
+            return self._canvas_area("map view")
+        if choice == "area":
+            return self.area
         return None
 
     def _show_pin(self):

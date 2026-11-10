@@ -95,35 +95,49 @@ ortho = QgsRasterLayer(tif, "Ortho")
 assert ortho.isValid() and layer_in_area(ortho, area)
 assert not layer_in_area(ortho, FieldArea.from_rect(QgsRectangle(700000, 7100000, 701000, 7101000), UTM35S, "far"))
 
-full = estimate_tiles(ortho, 14, 16)
-clipped = estimate_tiles(ortho, 14, 16, area.bbox_wgs84())
+full = estimate_tiles(ortho, 14, 17)
+clipped = estimate_tiles(ortho, 14, 17, area)
 print("tiles: whole layer", full, "field area", clipped)
 assert 0 < clipped < full / 4, (clipped, full)
-far = FieldArea.from_rect(QgsRectangle(700000, 7100000, 701000, 7101000), UTM35S, "far").bbox_wgs84()
-assert estimate_tiles(ortho, 14, 16, far) is None
+far = FieldArea.from_rect(QgsRectangle(700000, 7100000, 701000, 7101000), UTM35S, "far")
+assert estimate_tiles(ortho, 14, 17, far) is None
 assert clipped_bbox_wgs84(osm, area.bbox_wgs84()) == area.bbox_wgs84(), "online layers are cut to the area"
 
 try:
-    RasterPackager(ortho, folder, 14, 16, "jpg", lambda ok, err: None, clip=far)
+    RasterPackager(ortho, folder, 14, 17, "jpg", lambda ok, err: None, clip=far)
     raise AssertionError("should refuse a raster outside the area")
 except ValueError:
     pass
 
 result = {}
 out_dir = os.path.join(folder, "tiles")
-packager = RasterPackager(ortho, out_dir, 14, 16, "jpg",
-                          lambda ok, err: (result.update(ok=ok, err=err), app.quit()), clip=area.bbox_wgs84())
+packager = RasterPackager(ortho, out_dir, 14, 17, "jpg",
+                          lambda ok, err: (result.update(ok=ok, err=err), app.quit()), clip=area)
 packager.start()
 app.exec()
 assert result.get("ok"), result
-written = sum(len(files) for _, _, files in os.walk(out_dir)) - 1  # minus mapper.json
+files = [os.path.join(d, f) for d, _, fs in os.walk(out_dir) for f in fs if f != "mapper.json"]
 import json  # noqa: E402
 
 with open(os.path.join(out_dir, "mapper.json"), encoding="utf-8") as f:
     meta = json.load(f)
 bbox = area.bbox_wgs84()
-assert written == clipped == meta["tileCount"], (written, clipped, meta["tileCount"])
+assert len(files) == meta["tileCount"] and 0 < len(files) <= clipped, (len(files), clipped, meta["tileCount"])
 assert abs(meta["bounds"][0] - bbox.xMinimum()) < 1e-9 and abs(meta["bounds"][3] - bbox.yMaximum()) < 1e-9, meta["bounds"]
+
+# The ortho is 4 km wide and the area is 1 km in its corner, so nothing of the ortho may show
+# outside the area: tiles cut by the area's edge are PNG, transparent outside it.
+from qgis.PyQt.QtGui import QImage  # noqa: E402
+
+jpgs = [f for f in files if f.endswith(".jpg")]
+pngs = [f for f in files if f.endswith(".png")]
+assert jpgs and pngs, (len(jpgs), len(pngs))
+low = [f for f in files if os.sep + "14" + os.sep in f]
+assert low and all(f.endswith(".png") for f in low), "a zoom-14 tile is far bigger than the area"
+for path in pngs:
+    img = QImage(path)
+    alphas = {img.pixelColor(x, y).alpha() for x in range(0, 256, 8) for y in range(0, 256, 8)}
+    assert 0 in alphas and 255 in alphas, (path, sorted(alphas)[:5])
 # Phones only get the features in the field area, and oversized layers are left out, not sent.
 import mappa_mundi_sync.backend as backend_module  # noqa: E402
 from mappa_mundi_sync.area import count_in_area, features_in_area  # noqa: E402
