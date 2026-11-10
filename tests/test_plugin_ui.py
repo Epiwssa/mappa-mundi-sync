@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["QGIS_CUSTOM_CONFIG_PATH"] = tempfile.mkdtemp(prefix="mapper_ui_cfg_")
 
 from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer  # noqa: E402
-from qgis.gui import QgsMapCanvas  # noqa: E402
+from qgis.gui import QgsMapCanvas, QgsMessageBar  # noqa: E402
 from qgis.PyQt.QtWidgets import QMainWindow  # noqa: E402
 
 app = QgsApplication([], True)
@@ -20,6 +20,14 @@ class StubIface:
     def __init__(self):
         self.window = QMainWindow()
         self.canvas = QgsMapCanvas()
+        self.active = None
+        self.bar = QgsMessageBar()
+
+    def activeLayer(self):
+        return self.active
+
+    def messageBar(self):
+        return self.bar
 
     def mainWindow(self):
         return self.window
@@ -74,6 +82,7 @@ assert pin in plugin.pin_label.text()
 shot = os.environ.get("MAPPER_UI_SHOT")
 if shot:
     plugin.dock.resize(380, 900)
+    plugin.dock.widget().resize(380, 900)
     plugin.dock.widget().grab().save(shot)
 
 # The PIN survives a server restart (phones stay paired)...
@@ -98,6 +107,73 @@ combo = plugin.layer_table.cellWidget(row, 1)
 combo.setCurrentIndex(combo.findData("view"))
 from mappa_mundi_sync.backend import layer_mode  # noqa: E402
 assert layer_mode(pts) == "view"
+
+# Field area: layers with data in it stay shared, the rest are excluded; tiles follow it.
+from qgis.core import QgsCoordinateReferenceSystem, QgsFeature, QgsGeometry, QgsPointXY, QgsRectangle  # noqa: E402
+
+wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
+far = QgsVectorLayer("Point?crs=EPSG:4326", "Far", "memory")
+for layer, (x, y) in ((pts, (28.0, -26.0)), (far, (10.0, 50.0))):
+    f = QgsFeature()
+    f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
+    layer.dataProvider().addFeatures([f])
+    layer.updateExtents()
+QgsProject.instance().addMapLayer(far)
+iface.canvas.setDestinationCrs(wgs84)
+iface.canvas.setLayers([pts, far, osm])
+iface.canvas.setExtent(QgsRectangle(27.9, -26.1, 28.1, -25.9))
+
+assert "whole project" in plugin.area_label.text() and not plugin.share_area_btn.isEnabled()
+plugin._area_from_view()
+assert plugin.area and "map view" in plugin.area_label.text() and plugin.share_area_btn.isEnabled()
+assert plugin.extent_combo.currentData() == "area"
+assert plugin.backend._manifest()["project"]["bbox"][0] > 27.8, "phones open on the field area"
+plugin._share_in_area()
+assert layer_mode(pts) == "view" and layer_mode(osm) == "basemap" and layer_mode(far) == "exclude"
+
+# Sharing what's on screen brings back an excluded layer once it's in view.
+iface.canvas.setExtent(QgsRectangle(9.9, 49.9, 10.1, 50.1))
+plugin._share_on_screen()
+assert layer_mode(far) == "edit" and layer_mode(pts) == "exclude" and layer_mode(osm) == "basemap"
+
+# Selected features, and the area is kept in the project.
+import mappa_mundi_sync.plugin as plugin_module  # noqa: E402
+
+messages = []
+plugin_module.QMessageBox.information = lambda _parent, _title, text: messages.append(text)
+plugin._area_from_selection()  # nothing selected: only a message, area unchanged
+assert messages and "Select one or more features" in messages[-1] and "map view" in plugin.area.label
+far2 = QgsVectorLayer("Point?crs=EPSG:4326", "Sel", "memory")
+feats = []
+for x, y in ((10.0, 50.0), (10.5, 50.4)):
+    f = QgsFeature()
+    f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
+    feats.append(f)
+far2.dataProvider().addFeatures(feats)
+far2.selectAll()
+iface.active = far2
+plugin._area_from_selection()
+assert "2 selected features of Sel" in plugin.area.label
+from mappa_mundi_sync.area import load_area  # noqa: E402
+assert load_area(QgsProject.instance()).label == plugin.area.label
+
+# Drawing switches to the rectangle tool and restores the previous one afterwards.
+plugin._draw_area()
+assert iface.canvas.mapTool() is plugin.area_tool
+plugin._area_drawn(QgsRectangle(27.95, -26.05, 28.05, -25.95))
+assert plugin.area.label == "drawn rectangle" and plugin.area_tool is None and iface.canvas.mapTool() is None
+
+# Raster tiles: the online basemap is cut to the area instead of the whole world.
+plugin.raster_combo.setCurrentIndex(plugin.raster_combo.findData(osm.id()))
+plugin.zmin_spin.setValue(10)
+plugin.zmax_spin.setValue(12)
+in_area = plugin.estimate_label.text()
+plugin.extent_combo.setCurrentIndex(plugin.extent_combo.findData("full"))
+whole = plugin.estimate_label.text()
+assert in_area != whole and "About" in in_area, (in_area, whole)
+
+plugin._clear_area()
+assert plugin.area is None and load_area(QgsProject.instance()) is None and "whole project" in plugin.area_label.text()
 
 plugin.unload()
 print("RESULT: PASS (pin was", pin + ")")

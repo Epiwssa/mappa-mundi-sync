@@ -3,7 +3,8 @@ import os
 import time
 from urllib.parse import quote
 
-from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsSettings
+from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayer
+from qgis.gui import QgsMapToolExtent, QgsRubberBand
 from qgis.PyQt.QtCore import QRectF, Qt, QTime, QTimer
 from qgis.PyQt.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import (
@@ -16,6 +17,7 @@ from qgis.PyQt.QtWidgets import (
     QHeaderView,
     QLabel,
     QListWidget,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -26,7 +28,8 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from .backend import MODE_LABELS, ProjectBackend, allowed_modes, layer_mode, safe_name, set_layer_mode
+from .area import FieldArea, layer_in_area, load_area, save_area
+from .backend import MODE_LABELS, ProjectBackend, allowed_modes, default_mode, layer_mode, safe_name, set_layer_mode
 from .packager import RasterPackager, estimate_tiles, suggested_max_zoom
 from .qrcode import encode as qr_encode
 from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addresses, new_pin, pairing_url
@@ -78,6 +81,10 @@ class MapperSyncPlugin:
         self.invoker = None
         self.backend = None
         self.packager = None
+        self.area = None  # FieldArea, or None for the whole project
+        self.area_band = None
+        self.area_tool = None
+        self.previous_tool = None
 
     # --- QGIS plugin lifecycle -------------------------------------------
 
@@ -100,6 +107,10 @@ class MapperSyncPlugin:
         project.layersAdded.connect(self._refresh_layers)
         project.layersRemoved.connect(self._refresh_layers)
         project.readProject.connect(self._refresh_layers)
+        project.readProject.connect(self._load_area)
+        project.cleared.connect(self._load_area)
+        self.iface.mapCanvas().extentsChanged.connect(self._canvas_moved)
+        self._load_area()
 
     def unload(self):
         self._stop_server()
@@ -109,6 +120,16 @@ class MapperSyncPlugin:
         for sig in (project.layersAdded, project.layersRemoved, project.readProject):
             with contextlib.suppress(TypeError):  # already disconnected
                 sig.disconnect(self._refresh_layers)
+        for sig in (project.readProject, project.cleared):
+            with contextlib.suppress(TypeError):
+                sig.disconnect(self._load_area)
+        with contextlib.suppress(TypeError):
+            self.iface.mapCanvas().extentsChanged.disconnect(self._canvas_moved)
+        self._stop_drawing()
+        if self.area_band:
+            self.area_band.reset()
+            self.iface.mapCanvas().scene().removeItem(self.area_band)
+            self.area_band = None
         self.iface.removePluginMenu("Mappa Mundi Sync", self.action)
         self.iface.removeToolBarIcon(self.action)
         if self.dock:
@@ -121,6 +142,9 @@ class MapperSyncPlugin:
             self._refresh_layers()
 
     def _canvas_extent(self):
+        """Where phones open the map: the field area if there is one, else the current view."""
+        if self.area:
+            return self.area.geometry.boundingBox(), self.area.crs
         canvas = self.iface.mapCanvas()
         return canvas.extent(), canvas.mapSettings().destinationCrs()
 
@@ -190,6 +214,32 @@ class MapperSyncPlugin:
         # Layers
         box = QGroupBox("Layers shared with the phone")
         bl = QVBoxLayout(box)
+        area_row = QHBoxLayout()
+        self.area_label = QLabel()
+        self.area_label.setWordWrap(True)
+        area_btn = QPushButton("Set field area")
+        area_btn.setToolTip("The part of the project to take into the field")
+        menu = QMenu(area_btn)
+        menu.addAction("Use the current map view", self._area_from_view)
+        menu.addAction("Draw a rectangle on the map", self._draw_area)
+        menu.addAction("Use the selected features", self._area_from_selection)
+        menu.addSeparator()
+        self.clear_area_action = menu.addAction("Clear (whole project)", self._clear_area)
+        area_btn.setMenu(menu)
+        area_row.addWidget(self.area_label, 1)
+        area_row.addWidget(area_btn)
+        bl.addLayout(area_row)
+        pick_row = QHBoxLayout()
+        self.share_area_btn = QPushButton("Share layers in area")
+        self.share_area_btn.setToolTip("Share the layers that have data in the field area and exclude the rest")
+        self.share_area_btn.clicked.connect(self._share_in_area)
+        share_screen_btn = QPushButton("Share layers on screen")
+        share_screen_btn.setToolTip("Share the layers that are switched on and have data in the current "
+                                    "map view, and exclude the rest")
+        share_screen_btn.clicked.connect(self._share_on_screen)
+        pick_row.addWidget(self.share_area_btn)
+        pick_row.addWidget(share_screen_btn)
+        bl.addLayout(pick_row)
         self.layer_table = QTableWidget(0, 2)
         self.layer_table.setHorizontalHeaderLabels(["Layer", "On phone"])
         self.layer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -210,6 +260,12 @@ class MapperSyncPlugin:
         self.zmax_spin.setValue(18)
         self.zmin_spin.valueChanged.connect(self._update_estimate)
         self.zmax_spin.valueChanged.connect(self._update_estimate)
+        self.extent_combo = QComboBox()
+        self.extent_combo.addItem("Field area", "area")
+        self.extent_combo.addItem("Current map view", "view")
+        self.extent_combo.addItem("Whole layer", "full")
+        self.extent_combo.setToolTip("Tiles are only made inside this extent")
+        self.extent_combo.currentIndexChanged.connect(self._update_estimate)
         self.format_combo = QComboBox()
         self.format_combo.addItem("JPEG (smaller, for photos/orthos)", "jpg")
         self.format_combo.addItem("PNG (keeps transparency)", "png")
@@ -224,6 +280,7 @@ class MapperSyncPlugin:
         zoom_row.addWidget(QLabel("to"))
         zoom_row.addWidget(self.zmax_spin)
         form.addRow("Zoom", zoom_row)
+        form.addRow("Extent", self.extent_combo)
         form.addRow("Format", self.format_combo)
         form.addRow("", self.estimate_label)
         form.addRow(self.package_btn)
@@ -283,6 +340,146 @@ class MapperSyncPlugin:
         set_layer_mode(layer, mode)
         QgsProject.instance().setDirty(True)
         self.backend.bump_structure()
+
+    # --- field area -------------------------------------------------------
+
+    def _load_area(self, *_):
+        self.area = load_area(QgsProject.instance())
+        self._show_area()
+
+    def _set_area(self, area):
+        self.area = area
+        save_area(QgsProject.instance(), area)
+        QgsProject.instance().setDirty(True)
+        self.backend.bump_structure()  # phones open on the new area
+        self._show_area()
+        if area:
+            self.extent_combo.setCurrentIndex(self.extent_combo.findData("area"))
+            self._log(f"Field area set: {area.label}")
+        else:
+            self._log("Field area cleared")
+
+    def _show_area(self):
+        if not self.dock:
+            return
+        if self.area:
+            self.area_label.setText(f"Field area: <b>{self.area.label}</b>")
+        else:
+            self.area_label.setText("Field area: <b>whole project</b>")
+        self.share_area_btn.setEnabled(self.area is not None)
+        self.clear_area_action.setEnabled(self.area is not None)
+        canvas = self.iface.mapCanvas()
+        if self.area_band is None:
+            self.area_band = QgsRubberBand(canvas)
+            self.area_band.setStrokeColor(QColor(214, 51, 132))
+            self.area_band.setFillColor(QColor(214, 51, 132, 25))
+            self.area_band.setWidth(2)
+        if self.area:
+            self.area_band.setToGeometry(self.area.geometry, self.area.crs)
+        else:
+            self.area_band.reset()
+        self._update_estimate()
+
+    def _canvas_area(self, label):
+        """The current map view as an area, or None if the map has nothing to show yet."""
+        canvas = self.iface.mapCanvas()
+        if canvas.extent().isEmpty():
+            return None
+        return FieldArea.from_rect(canvas.extent(), canvas.mapSettings().destinationCrs(), label)
+
+    def _area_from_view(self):
+        area = self._canvas_area("map view")
+        if area is None:
+            QMessageBox.information(self.dock, "Mappa Mundi Sync", "Zoom the map to the field area first.")
+            return
+        self._set_area(area)
+
+    def _draw_area(self):
+        canvas = self.iface.mapCanvas()
+        self._stop_drawing()
+        self.previous_tool = canvas.mapTool()
+        self.area_tool = QgsMapToolExtent(canvas)
+        self.area_tool.extentChanged.connect(self._area_drawn)
+        canvas.setMapTool(self.area_tool)
+        self.iface.messageBar().pushInfo("Mappa Mundi Sync", "Drag a rectangle on the map to set the field area.")
+
+    def _area_drawn(self, rect):
+        if rect.isEmpty():
+            return
+        crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+        self._stop_drawing()
+        self._set_area(FieldArea.from_rect(rect, crs, "drawn rectangle"))
+
+    def _stop_drawing(self):
+        if self.area_tool is None:
+            return
+        canvas = self.iface.mapCanvas()
+        if canvas.mapTool() is self.area_tool:
+            if self.previous_tool:
+                canvas.setMapTool(self.previous_tool)
+            else:
+                canvas.unsetMapTool(self.area_tool)
+        self.area_tool.deleteLater()
+        self.area_tool = None
+        self.previous_tool = None
+
+    def _area_from_selection(self):
+        layer = self.iface.activeLayer()
+        if not isinstance(layer, QgsVectorLayer) or layer.selectedFeatureCount() == 0:
+            QMessageBox.information(self.dock, "Mappa Mundi Sync",
+                                    "Select one or more features in the active layer first.")
+            return
+        area = FieldArea.from_features(layer, layer.selectedFeatures())
+        if area is None:
+            QMessageBox.information(self.dock, "Mappa Mundi Sync",
+                                    "The selection has no area. Select polygons, or several points or lines "
+                                    "spread over the area.")
+            return
+        self._set_area(area)
+
+    def _clear_area(self):
+        self._set_area(None)
+
+    def _share_in_area(self):
+        if self.area:
+            self._share_only(self.area, "field area")
+
+    def _share_on_screen(self):
+        area = self._canvas_area("map view")
+        if area is not None:
+            self._share_only(area, "map view", candidates=set(self.iface.mapCanvas().layers()))
+
+    def _share_only(self, area, where, candidates=None):
+        """Share the layers with data in the area (keeping their chosen mode); exclude the rest."""
+        layers = [n.layer() for n in QgsProject.instance().layerTreeRoot().findLayers() if n.layer() is not None]
+        shared = 0
+        for layer in layers:
+            keep = (candidates is None or layer in candidates) and layer_in_area(layer, area)
+            if keep:
+                if layer_mode(layer) == "exclude":
+                    set_layer_mode(layer, default_mode(layer))
+                shared += 1
+            else:
+                set_layer_mode(layer, "exclude")
+        QgsProject.instance().setDirty(True)
+        self.backend.bump_structure()
+        self._refresh_layers()
+        self._log(f"Sharing {shared} layer{'s' if shared != 1 else ''} with data in the {where}; "
+                  f"{len(layers) - shared} excluded")
+
+    def _canvas_moved(self):
+        if self.dock and self.dock.isVisible() and self.extent_combo.currentData() == "view":
+            self._update_estimate()
+
+    def _raster_clip(self):
+        """WGS84 box that offline tiles are cut to, or None for the whole layer."""
+        choice = self.extent_combo.currentData()
+        if choice == "view":
+            view = self._canvas_area("map view")
+            return view.bbox_wgs84() if view else None
+        if choice == "area" and self.area:
+            return self.area.bbox_wgs84()
+        return None
 
     def _show_pin(self):
         self.pin_label.setText(f"PIN: <b>{saved_pin()}</b>")
@@ -356,8 +553,14 @@ class MapperSyncPlugin:
         if self.zmin_spin.value() > self.zmax_spin.value():
             self.estimate_label.setText("Min zoom must not exceed max zoom.")
             return
-        n = estimate_tiles(layer, self.zmin_spin.value(), self.zmax_spin.value())
-        self.estimate_label.setText(f"About {n:,} tiles (~{n * 25 / 1024:,.0f} MB as JPEG)")
+        n = estimate_tiles(layer, self.zmin_spin.value(), self.zmax_spin.value(), self._raster_clip())
+        if n is None:
+            self.estimate_label.setText("This layer is outside the chosen extent.")
+            self.package_btn.setEnabled(False)
+            return
+        self.package_btn.setEnabled(self.packager is None)
+        note = " Field area not set: whole layer." if self.extent_combo.currentData() == "area" and not self.area else ""
+        self.estimate_label.setText(f"About {n:,} tiles (~{n * 25 / 1024:,.0f} MB as JPEG).{note}")
 
     # --- actions ----------------------------------------------------------
 
@@ -404,10 +607,7 @@ class MapperSyncPlugin:
         if zmin > zmax:
             return
         out_dir = os.path.join(self.backend.tiles_root(), safe_name(layer.id()))
-        self.package_btn.setEnabled(False)
-        self.progress.setValue(0)
-        self.progress.setVisible(True)
-        self._log(f"Building tiles for {layer.name()} (z{zmin}-{zmax})")
+        clip = self._raster_clip()
 
         def done(ok, error):
             self.packager = None
@@ -420,8 +620,16 @@ class MapperSyncPlugin:
             else:
                 self._log(f"Tiles for {layer.name()} failed: {error}")
 
-        self.packager = RasterPackager(
-            layer, out_dir, zmin, zmax, self.format_combo.currentData(), done,
-            on_progress=lambda p: self.progress.setValue(int(p)),
-        )
+        try:
+            self.packager = RasterPackager(
+                layer, out_dir, zmin, zmax, self.format_combo.currentData(), done,
+                on_progress=lambda p: self.progress.setValue(int(p)), clip=clip,
+            )
+        except ValueError as e:
+            QMessageBox.information(self.dock, "Mappa Mundi Sync", str(e))
+            return
+        self.package_btn.setEnabled(False)
+        self.progress.setValue(0)
+        self.progress.setVisible(True)
+        self._log(f"Building tiles for {layer.name()} (z{zmin}-{zmax}, {self.extent_combo.currentText().lower()})")
         self.packager.start()

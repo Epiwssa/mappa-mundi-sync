@@ -21,8 +21,8 @@ To install from source, copy (or link) the `mappa_mundi_sync` folder into your Q
 1. Open a project and click the Mappa Mundi (MM map) icon on the toolbar.
 2. Press **Start sync server**.
 3. In the Mappa Mundi app, tap **Connect to QGIS → Scan QR code**.
-4. Choose per layer whether phones can edit it, view it, or not see it at all.
-5. Build offline tiles for any raster layers you want on the phone.
+4. Choose per layer whether phones can edit it, view it, or not see it at all. To do it in one go, set a **field area** (the map view, a rectangle drawn on the map, or selected features), then press **Share layers in area**. Or press **Share layers on screen**. Either way, layers with data there are shared and the rest are excluded.
+5. Build offline tiles for any raster layers you want on the phone. Tiles can be limited to the field area, the map view or the whole layer.
 
 ## Development
 

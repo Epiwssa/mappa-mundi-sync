@@ -24,16 +24,12 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QRect, QSize, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPainter
 
+from .area import clipped_bbox_wgs84
+
 WEB_MERCATOR = QgsCoordinateReferenceSystem("EPSG:3857")
-WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 TILE = 256
 META = 4
 ORIGIN = math.pi * 6378137
-
-
-def _to_wgs84(layer):
-    xform = QgsCoordinateTransform(layer.crs(), WGS84, QgsProject.instance())
-    return xform.transformBoundingBox(layer.extent())
 
 
 def suggested_max_zoom(layer):
@@ -69,8 +65,12 @@ def tile_ranges(bbox_wgs84, zmin, zmax):
     return out
 
 
-def estimate_tiles(layer, zmin, zmax):
-    return sum((x1 - x0 + 1) * (y1 - y0 + 1) for x0, y0, x1, y1 in tile_ranges(_to_wgs84(layer), zmin, zmax).values())
+def estimate_tiles(layer, zmin, zmax, clip=None):
+    """Tile count for the layer, cut to the clip box (WGS84) if given. None if they don't overlap."""
+    bbox = clipped_bbox_wgs84(layer, clip)
+    if bbox is None:
+        return None
+    return sum((x1 - x0 + 1) * (y1 - y0 + 1) for x0, y0, x1, y1 in tile_ranges(bbox, zmin, zmax).values())
 
 
 def tile_bounds(z, x, y):
@@ -79,11 +79,11 @@ def tile_bounds(z, x, y):
 
 
 class TileRenderTask(QgsTask):
-    def __init__(self, layer, out_dir, zmin, zmax, fmt):
+    def __init__(self, layer, out_dir, zmin, zmax, fmt, bbox):
         super().__init__(f"Mappa Mundi: offline tiles for {layer.name()}", QgsTask.Flag.CanCancel)
         self.out_dir = out_dir
         self.fmt = fmt
-        self.ranges = tile_ranges(_to_wgs84(layer), zmin, zmax)
+        self.ranges = tile_ranges(bbox, zmin, zmax)
         self.total = sum((r[2] - r[0] + 1) * (r[3] - r[1] + 1) for r in self.ranges.values())
         self.written = 0
         self.error = None
@@ -141,10 +141,16 @@ class TileRenderTask(QgsTask):
 
 
 class RasterPackager:
-    """Builds the tile folder for one layer and writes mapper.json when done."""
+    """Builds the tile folder for one layer and writes mapper.json when done.
 
-    def __init__(self, layer, out_dir, zmin, zmax, fmt, on_done, on_progress=None):
+    With a clip box (WGS84), only tiles inside it are made.
+    """
+
+    def __init__(self, layer, out_dir, zmin, zmax, fmt, on_done, on_progress=None, clip=None):
         self.layer = layer
+        self.bbox = clipped_bbox_wgs84(layer, clip)
+        if self.bbox is None:
+            raise ValueError(f"{layer.name()} doesn't overlap the chosen area")
         self.out_dir = out_dir
         self.zmin, self.zmax, self.fmt = zmin, zmax, fmt
         self.on_done = on_done
@@ -155,7 +161,7 @@ class RasterPackager:
         if os.path.isdir(self.out_dir):
             shutil.rmtree(self.out_dir)
         os.makedirs(self.out_dir)
-        self.task = TileRenderTask(self.layer, self.out_dir, self.zmin, self.zmax, self.fmt)
+        self.task = TileRenderTask(self.layer, self.out_dir, self.zmin, self.zmax, self.fmt, self.bbox)
         if self.on_progress:
             self.task.progressChanged.connect(self.on_progress)
         self.task.taskCompleted.connect(lambda: self._finished(True))
@@ -168,7 +174,7 @@ class RasterPackager:
 
     def _finished(self, ok):
         if ok:
-            ext = _to_wgs84(self.layer)
+            ext = self.bbox
             meta = {
                 "layerId": self.layer.id(),
                 "name": self.layer.name(),
