@@ -198,8 +198,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, backend.status())
 
         if method == "GET" and path == "/api/project":
+            manifest = backend.manifest()
             self.sync.log(f"{self.client_address[0]} downloaded the project manifest")
-            return self._json(200, backend.manifest())
+            if manifest["skipped"]:
+                self.sync.log(f"Not sent, too many features for a phone: {', '.join(manifest['skipped'])}. "
+                              "Set a field area to send only the part you need.")
+            return self._json(200, manifest)
 
         m = re.match(r"^/api/layers/([^/]+)/features$", path)
         if method == "GET" and m:

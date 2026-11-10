@@ -124,5 +124,53 @@ with open(os.path.join(out_dir, "mapper.json"), encoding="utf-8") as f:
 bbox = area.bbox_wgs84()
 assert written == clipped == meta["tileCount"], (written, clipped, meta["tileCount"])
 assert abs(meta["bounds"][0] - bbox.xMinimum()) < 1e-9 and abs(meta["bounds"][3] - bbox.yMaximum()) < 1e-9, meta["bounds"]
+# Phones only get the features in the field area, and oversized layers are left out, not sent.
+import mappa_mundi_sync.backend as backend_module  # noqa: E402
+from mappa_mundi_sync.area import count_in_area, features_in_area  # noqa: E402
+from mappa_mundi_sync.backend import ProjectBackend  # noqa: E402
+from mappa_mundi_sync.server import MainThreadInvoker  # noqa: E402
+
+big = points("Big", [(600100 + i * 10, 7100100) for i in range(30)] + [(650000 + i, 7150000) for i in range(70)])
+assert len(list(features_in_area(big, area))) == 30 and len(list(features_in_area(big, None))) == 100
+assert count_in_area(big, None, 1000) == 100 and count_in_area(big, area, 10) == 11, "stops counting past the limit"
+project.addMapLayers([big, inside, outside])
+
+state = {"area": None}
+backend = ProjectBackend(MainThreadInvoker(), field_area=lambda: state["area"])
+backend_module.MAX_PHONE_FEATURES = 50
+manifest = backend.manifest()
+names = [layer["name"] for layer in manifest["layers"]]
+assert "Big" not in names and manifest["skipped"] == ["Big"] and "Inside" in names, manifest["skipped"]
+try:
+    backend.layer_features(big.id())
+    raise AssertionError("an oversized layer must not be built")
+except ValueError as e:
+    assert "field area" in str(e)
+
+revs = backend.revisions()["layers"].get(big.id(), 0)
+state["area"] = area
+backend.area_changed()
+assert backend.revisions()["layers"][big.id()] == revs + 1, "phones refetch after the area changes"
+manifest = backend.manifest()
+counts = {layer["name"]: layer["featureCount"] for layer in manifest["layers"]}
+assert manifest["skipped"] == [] and counts["Big"] == 30 and counts["Outside"] == 0, counts
+fc = json.loads(backend.layer_features(big.id()))
+assert len(fc["features"]) == 30
+assert len(json.loads(backend.layer_features(outside.id()))["features"]) == 0
+# Categorized styles with an "all other values" class: its symbol must be read while still alive.
+from qgis.core import QgsCategorizedSymbolRenderer, QgsRendererCategory, QgsSymbol  # noqa: E402
+from qgis.PyQt.QtGui import QColor  # noqa: E402
+from mappa_mundi_sync.backend import renderer_style  # noqa: E402
+
+landuse = QgsVectorLayer("Polygon?crs=EPSG:4326&field=fclass:string", "Landuse", "memory")
+cats = []
+for value, color in (("farmland", "#33aa33"), ("forest", "#116611"), ("", "#abcdef")):
+    sym = QgsSymbol.defaultSymbol(landuse.geometryType())
+    sym.setColor(QColor(color))
+    cats.append(QgsRendererCategory(value, sym, value or "all other values"))
+landuse.setRenderer(QgsCategorizedSymbolRenderer("fclass", cats))
+for _ in range(200):
+    style = renderer_style(landuse, "Polygon")
+    assert style["default"]["fill"] == "#abcdef" and len(style["categories"]) == 2, style
 print("RESULT: PASS")
 app.exitQgis()

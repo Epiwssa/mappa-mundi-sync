@@ -5,13 +5,15 @@ from urllib.parse import quote
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayer
 from qgis.gui import QgsMapToolExtent, QgsRubberBand
-from qgis.PyQt.QtCore import QRectF, Qt, QTime, QTimer
+from qgis.PyQt.QtCore import QRectF, Qt, QTime, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAction,
     QComboBox,
+    QDialog,
     QDockWidget,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -21,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -29,7 +32,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from .area import FieldArea, layer_in_area, load_area, save_area
-from .backend import MODE_LABELS, ProjectBackend, allowed_modes, default_mode, layer_mode, safe_name, set_layer_mode
+from .backend import MAX_PHONE_FEATURES, MODE_LABELS, ProjectBackend, allowed_modes, default_mode, layer_mode, safe_name, set_layer_mode
 from .packager import RasterPackager, estimate_tiles, suggested_max_zoom
 from .qrcode import encode as qr_encode
 from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addresses, new_pin, pairing_url
@@ -48,9 +51,16 @@ ACCESS_MAILTO = "mailto:{}?subject={}&body={}".format(
 )
 
 
-def qr_pixmap(text, module_px=5, quiet=4):
+# Pairing QR code sizes in pixels; the user picks one, and it is remembered.
+QR_SIZES = {"small": 150, "medium": 230, "large": 340}
+
+
+def qr_pixmap(text, module_px=5, quiet=4, size=None):
+    """QR code image. With size, the modules are scaled (in whole pixels, so it stays sharp) to about size px."""
     matrix = qr_encode(text)
     n = len(matrix) + quiet * 2
+    if size:
+        module_px = max(2, size // n)
     image = QImage(n * module_px, n * module_px, QImage.Format.Format_RGB32)
     image.fill(QColor("white"))
     painter = QPainter(image)
@@ -60,6 +70,14 @@ def qr_pixmap(text, module_px=5, quiet=4):
                 painter.fillRect(QRectF((x + quiet) * module_px, (y + quiet) * module_px, module_px, module_px), QColor("black"))
     painter.end()
     return QPixmap.fromImage(image)
+
+
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 def saved_pin():
@@ -96,7 +114,7 @@ class MapperSyncPlugin:
         self.iface.addPluginToMenu("Mappa Mundi Sync", self.action)
 
         self.invoker = MainThreadInvoker()
-        self.backend = ProjectBackend(self.invoker, canvas_extent=self._canvas_extent)
+        self.backend = ProjectBackend(self.invoker, canvas_extent=self._canvas_extent, field_area=lambda: self.area)
         self.backend.watch_project()
         self._build_dock()
         self.device_timer = QTimer()
@@ -191,11 +209,33 @@ class MapperSyncPlugin:
         self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_label.setWordWrap(True)
         bl.addWidget(self.status_label)
-        self.qr_label = QLabel()
+        self.qr_label = ClickableLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setVisible(False)
-        self.qr_label.setToolTip("Scan with the Mappa Mundi app: Connect > Scan QR code")
+        self.qr_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.qr_label.setToolTip("Scan with the Mappa Mundi app: Connect > Scan QR code. Click to enlarge.")
+        self.qr_label.clicked.connect(self._show_big_qr)
         bl.addWidget(self.qr_label)
+        self.qr_size_row = QWidget()
+        qr_row = QHBoxLayout(self.qr_size_row)
+        qr_row.setContentsMargins(0, 0, 0, 0)
+        qr_row.addStretch(1)
+        qr_row.addWidget(QLabel("QR size"))
+        self.qr_size_combo = QComboBox()
+        for key in QR_SIZES:
+            self.qr_size_combo.addItem(key.capitalize(), key)
+        saved = QgsSettings().value("mapper_sync/qr_size", "medium")
+        self.qr_size_combo.setCurrentIndex(max(0, self.qr_size_combo.findData(saved)))
+        self.qr_size_combo.currentIndexChanged.connect(self._qr_size_changed)
+        qr_row.addWidget(self.qr_size_combo)
+        enlarge_btn = QPushButton("Enlarge")
+        enlarge_btn.setToolTip("Show the QR code big, in its own window")
+        enlarge_btn.clicked.connect(self._show_big_qr)
+        qr_row.addWidget(enlarge_btn)
+        qr_row.addStretch(1)
+        self.qr_size_row.setVisible(False)
+        bl.addWidget(self.qr_size_row)
+        self.pairing = None  # pairing URL in the QR code while the server runs
         pin_row = QHBoxLayout()
         self.pin_label = QLabel()
         self.new_pin_btn = QPushButton("New PIN")
@@ -241,6 +281,7 @@ class MapperSyncPlugin:
         pick_row.addWidget(share_screen_btn)
         bl.addLayout(pick_row)
         self.layer_table = QTableWidget(0, 2)
+        self.layer_table.setMinimumHeight(180)
         self.layer_table.setHorizontalHeaderLabels(["Layer", "On phone"])
         self.layer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.layer_table.verticalHeader().setVisible(False)
@@ -293,7 +334,12 @@ class MapperSyncPlugin:
         layout.addWidget(QLabel("Activity"))
         layout.addWidget(self.log_list)
 
-        self.dock.setWidget(root)
+        # Scrolls instead of growing: a tall panel would stretch the QGIS window off the screen.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(root)
+        self.dock.setWidget(scroll)
         self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
         self.dock.hide()
 
@@ -317,6 +363,12 @@ class MapperSyncPlugin:
         for row, layer in enumerate(layers):
             item = QTableWidgetItem(layer.name())
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            if layer_mode(layer) != "exclude" and self.backend.too_big(layer):
+                where = "in the field area" if self.area else "and no field area is set"
+                item.setText(f"⚠ {layer.name()}")
+                item.setForeground(QColor(180, 60, 0))
+                item.setToolTip(f"More than {MAX_PHONE_FEATURES:,} features {where}, too many for a phone. "
+                                "It won't be sent. Set a smaller field area, or exclude it.")
             self.layer_table.setItem(row, 0, item)
             combo = QComboBox()
             for mode in allowed_modes(layer):
@@ -346,13 +398,15 @@ class MapperSyncPlugin:
     def _load_area(self, *_):
         self.area = load_area(QgsProject.instance())
         self._show_area()
+        self._refresh_layers()
 
     def _set_area(self, area):
         self.area = area
         save_area(QgsProject.instance(), area)
         QgsProject.instance().setDirty(True)
-        self.backend.bump_structure()  # phones open on the new area
+        self.backend.area_changed()  # phones open on the new area and refetch its features
         self._show_area()
+        self._refresh_layers()
         if area:
             self.extent_combo.setCurrentIndex(self.extent_combo.findData("area"))
             self._log(f"Field area set: {area.label}")
@@ -507,12 +561,38 @@ class MapperSyncPlugin:
         box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         box.exec()
 
+    def _render_qr(self):
+        if self.pairing:
+            self.qr_label.setPixmap(qr_pixmap(self.pairing, size=QR_SIZES[self.qr_size_combo.currentData()]))
+
+    def _qr_size_changed(self, *_):
+        QgsSettings().setValue("mapper_sync/qr_size", self.qr_size_combo.currentData())
+        self._render_qr()
+
+    def _show_big_qr(self):
+        if not self.pairing:
+            return
+        screen = self.dock.screen().availableGeometry() if hasattr(self.dock, "screen") else None
+        size = int(min(screen.width(), screen.height()) * 0.7) if screen else 600
+        dialog = QDialog(self.dock)
+        dialog.setWindowTitle("Mappa Mundi Sync: scan to connect")
+        layout = QVBoxLayout(dialog)
+        image = QLabel()
+        image.setPixmap(qr_pixmap(self.pairing, size=size))
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(image)
+        text = QLabel(f"In the Mappa Mundi app tap <b>Scan QR code</b>. PIN <b>{self.server.pin}</b>")
+        text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(text)
+        dialog.exec()
+
     def _show_connection(self):
         port = self.server.port
         ips = local_ip_addresses()
-        url = pairing_url(ips, port, self.server.pin, QgsProject.instance().baseName())
-        self.qr_label.setPixmap(qr_pixmap(url))
+        self.pairing = pairing_url(ips, port, self.server.pin, QgsProject.instance().baseName())
+        self._render_qr()
         self.qr_label.setVisible(True)
+        self.qr_size_row.setVisible(True)
         addresses = ", ".join(f"<b>{ip}:{port}</b>" for ip in ips)
         self.status_label.setText(
             f"Running. In the Mappa Mundi app tap <b>Scan QR code</b>, or enter {addresses} "
@@ -593,6 +673,8 @@ class MapperSyncPlugin:
         if self.dock:
             self.status_label.setText("Server stopped.")
             self.qr_label.setVisible(False)
+            self.qr_size_row.setVisible(False)
+            self.pairing = None
             self.start_btn.setText("Start sync server")
             self.port_spin.setEnabled(True)
 

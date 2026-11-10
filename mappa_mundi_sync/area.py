@@ -88,16 +88,42 @@ def layer_in_area(layer, area):
     if isinstance(layer, QgsVectorLayer):
         if not layer.isSpatial():
             return True
-        geom = area.geometry_in(layer.crs())
-        request = QgsFeatureRequest().setFilterRect(geom.boundingBox()).setNoAttributes()
-        engine = QgsGeometry.createGeometryEngine(geom.constGet())
-        engine.prepareGeometry()
-        return any(f.hasGeometry() and engine.intersects(f.geometry().constGet()) for f in layer.getFeatures(request))
+        found = features_in_area(layer, area, QgsFeatureRequest().setNoAttributes())
+        return next(found, None) is not None
     if _is_online(layer):
         return True
     if isinstance(layer, QgsRasterLayer):
         return area.geometry_in(layer.crs()).intersects(QgsGeometry.fromRect(layer.extent()))
     return False
+
+
+def features_in_area(layer, area, request=None):
+    """The layer's features that touch the area (all of them when there's no area)."""
+    request = QgsFeatureRequest(request) if request else QgsFeatureRequest()
+    if area is None or not layer.isSpatial():
+        yield from layer.getFeatures(request)
+        return
+    geom = area.geometry_in(layer.crs())
+    request.setFilterRect(geom.boundingBox())
+    engine = QgsGeometry.createGeometryEngine(geom.constGet())
+    engine.prepareGeometry()
+    for f in layer.getFeatures(request):
+        if f.hasGeometry() and engine.intersects(f.geometry().constGet()):
+            yield f
+
+
+def count_in_area(layer, area, limit):
+    """How many features phones would get, counting no further than limit + 1."""
+    if area is None or not layer.isSpatial():
+        n = layer.featureCount()
+        if n >= 0:
+            return min(n, limit + 1)
+    count = 0
+    for _ in features_in_area(layer, area):
+        count += 1
+        if count > limit:
+            break
+    return count
 
 
 def layer_bbox_wgs84(layer):

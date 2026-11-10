@@ -79,6 +79,19 @@ pin = plugin.server.pin
 assert plugin.qr_label.isVisibleTo(plugin.dock) and not plugin.qr_label.pixmap().isNull()
 assert pin in plugin.pin_label.text()
 
+# The panel scrolls rather than forcing QGIS taller than the screen.
+assert plugin.dock.minimumSizeHint().height() < 300, plugin.dock.minimumSizeHint()
+# QR size: each choice gives a different size, and the choice is remembered.
+widths = {}
+for key in ("small", "medium", "large"):
+    plugin.qr_size_combo.setCurrentIndex(plugin.qr_size_combo.findData(key))
+    widths[key] = plugin.qr_label.pixmap().width()
+assert widths["small"] < widths["medium"] < widths["large"] <= 360, widths
+from qgis.core import QgsSettings  # noqa: E402
+assert QgsSettings().value("mapper_sync/qr_size") == "large"
+plugin.qr_size_combo.setCurrentIndex(plugin.qr_size_combo.findData("medium"))
+assert plugin.qr_size_row.isVisibleTo(plugin.dock)
+
 shot = os.environ.get("MAPPER_UI_SHOT")
 if shot:
     plugin.dock.resize(380, 900)
@@ -88,7 +101,7 @@ if shot:
 # The PIN survives a server restart (phones stay paired)...
 plugin._toggle_server()
 assert plugin.server is None and plugin.start_btn.text() == "Start sync server"
-assert not plugin.qr_label.isVisibleTo(plugin.dock)
+assert not plugin.qr_label.isVisibleTo(plugin.dock) and not plugin.qr_size_row.isVisibleTo(plugin.dock)
 plugin._toggle_server()
 assert plugin.server.pin == pin, "PIN should persist between server runs"
 # ...until the user asks for a new one, which applies to the running server immediately.

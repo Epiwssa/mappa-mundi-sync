@@ -35,6 +35,8 @@ from qgis.core import (
     QgsVectorLayerSimpleLabeling,
 )
 
+from .area import count_in_area, features_in_area
+
 MODE_PROP = "mapper_sync/mode"
 MODES = ("edit", "view", "basemap", "offline", "exclude")
 MODE_LABELS = {
@@ -45,6 +47,9 @@ MODE_LABELS = {
     "exclude": "Exclude",
 }
 TILES_DIRNAME = ".mapper_tiles"
+# More features than this in one layer is too much for a phone, and building it would
+# use gigabytes of memory in QGIS. Such layers are left out until a field area makes them smaller.
+MAX_PHONE_FEATURES = 50000
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 MM_TO_PX = 3.0
 
@@ -141,17 +146,20 @@ def symbol_style(symbol, geom_type):
 def renderer_style(layer, geom_type):
     r = layer.renderer()
     if isinstance(r, QgsCategorizedSymbolRenderer) and r.classAttribute() in layer.fields().names():
+        # categories() returns copies that own their symbols: read each symbol while its
+        # category is still alive, or QGIS reads freed memory and can crash.
+        categories = r.categories()
         cats = [
             {"value": c.value(), "label": c.label(), "symbol": symbol_style(c.symbol(), geom_type)}
-            for c in r.categories()
+            for c in categories
             if c.renderState() and c.value() not in (None, "")
         ]
-        default = next((c.symbol() for c in r.categories() if c.value() in (None, "")), None)
+        default = next((symbol_style(c.symbol(), geom_type) for c in categories if c.value() in (None, "")), None)
         return {
             "kind": "categorized",
             "field": r.classAttribute(),
             "categories": cats,
-            "default": symbol_style(default, geom_type),
+            "default": default,
         }
     if isinstance(r, QgsGraduatedSymbolRenderer) and r.classAttribute() in layer.fields().names():
         return {
@@ -304,9 +312,11 @@ class Conflict(Exception):
 
 
 class ProjectBackend:
-    def __init__(self, invoker, canvas_extent=None):
+    def __init__(self, invoker, canvas_extent=None, field_area=None):
         self.invoker = invoker
         self.canvas_extent = canvas_extent  # callable -> (QgsRectangle, crs) or None
+        self.field_area = field_area or (lambda: None)  # callable -> FieldArea or None
+        self._counts = {}  # (layer id, data revision, area) -> features phones would get
         # New on every QGIS session, so phones know old revision numbers no longer apply.
         self.server_id = secrets.token_hex(6)
         self.structure_rev = 1  # layers added/removed, styles, sharing modes, tiles rebuilt
@@ -360,6 +370,25 @@ class ProjectBackend:
     def bump_layer(self, layer_id):
         with self._lock:
             self.layer_revs[layer_id] = self.layer_revs.get(layer_id, 0) + 1
+
+    def area_changed(self):
+        """Phones must download every vector layer again: their features depend on the area."""
+        with self._lock:
+            self.structure_rev += 1
+            for layer in self._project().mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    self.layer_revs[layer.id()] = self.layer_revs.get(layer.id(), 0) + 1
+
+    def phone_feature_count(self, layer):
+        """Features phones would get from this layer (capped at MAX_PHONE_FEATURES + 1). Main thread."""
+        area = self.field_area()
+        key = (layer.id(), self.layer_revs.get(layer.id(), 0), area.geometry.asWkt() if area else None)
+        if key not in self._counts:
+            self._counts[key] = count_in_area(layer, area, MAX_PHONE_FEATURES)
+        return self._counts[key]
+
+    def too_big(self, layer):
+        return isinstance(layer, QgsVectorLayer) and self.phone_feature_count(layer) > MAX_PHONE_FEATURES
 
     def revisions(self):
         with self._lock:
@@ -416,7 +445,7 @@ class ProjectBackend:
 
     def _manifest(self):
         project = self._project()
-        layers, basemaps, rasters = [], [], []
+        layers, basemaps, rasters, skipped = [], [], [], []
         extent = QgsRectangle()
         extent.setMinimal()
         nodes = project.layerTreeRoot().findLayers()
@@ -430,6 +459,9 @@ class ProjectBackend:
             visible = node.isVisible()
             common = {"id": layer.id(), "name": layer.name(), "visible": visible, "order": order}
             if isinstance(layer, QgsVectorLayer):
+                if self.too_big(layer):
+                    skipped.append(layer.name())
+                    continue
                 kind = geometry_kind(layer)
                 layers.append({
                     **common,
@@ -438,7 +470,7 @@ class ProjectBackend:
                     "style": renderer_style(layer, kind),
                     "labelField": label_field(layer),
                     "fields": form_fields(layer),
-                    "featureCount": layer.featureCount(),
+                    "featureCount": self.phone_feature_count(layer),
                 })
                 if visible and kind != "NoGeometry":
                     extent.combineExtentWith(self._to_wgs84(layer.extent(), layer.crs()))
@@ -469,6 +501,7 @@ class ProjectBackend:
             "layers": layers,
             "basemaps": basemaps,
             "rasters": rasters,
+            "skipped": skipped,  # vector layers left out as too big for a phone
             "generated": time.time(),
             "revisions": self.revisions(),
         }
@@ -519,7 +552,9 @@ class ProjectBackend:
             exporter.setIncludeRelated(False)
             # Raw stored values, not ValueMap labels; the phone maps values to labels itself.
             exporter.setUseFieldFormatters(False)
-            features = list(layer.getFeatures())
+            if self.too_big(layer):
+                raise ValueError(f"{layer.name()} has too many features for a phone. Set a field area in QGIS.")
+            features = list(features_in_area(layer, self.field_area()))
             hashes = {f.id(): feature_hash(f) for f in features}
             fc = json.loads(exporter.exportFeatures(features))
             for f in fc.get("features", []):
