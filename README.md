@@ -8,6 +8,10 @@ A QGIS plugin that syncs the open project to the **Mappa Mundi** field app on an
 - **Phone-made layers:** layers and GPS tracks created on a phone are saved to a GeoPackage next to the project and added to it.
 - **Survey GPS:** accuracy, averaging and receiver details are stored in `gnss_*` fields, which are created automatically.
 
+## Get the app
+
+Mappa Mundi for Android is in testing on Google Play. To join, see [TESTING.md](TESTING.md).
+
 ## Install
 
 1. In QGIS, open *Plugins → Manage and Install Plugins*.

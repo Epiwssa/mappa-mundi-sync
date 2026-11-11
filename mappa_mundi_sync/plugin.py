@@ -40,9 +40,9 @@ from .server import DEFAULT_PORT, MainThreadInvoker, SyncServer, local_ip_addres
 
 HERE = os.path.dirname(__file__)
 
-# While the app is in Google Play testing: the opt-in page works for people on the tester list,
-# everyone else can ask to be added by email.
-APP_TESTING_URL = "https://play.google.com/apps/testing/com.epiwssa.mappamundi"
+# While the app is in Google Play testing, people join a Google Group that is the tester list.
+# The page walks them through it; the email is a fallback if they get stuck.
+APP_TESTING_URL = "https://github.com/Epiwssa/mappa-mundi-sync/blob/main/TESTING.md"
 ACCESS_EMAIL = "mrepiwssa@gmail.com"
 ACCESS_MAILTO = "mailto:{}?subject={}&body={}".format(
     ACCESS_EMAIL,
@@ -184,8 +184,8 @@ class MapperSyncPlugin:
         )
         app_label.setWordWrap(True)
         app_label.setOpenExternalLinks(True)
-        app_label.setToolTip("The test page only works once you're on the tester list. "
-                             "If it says the app isn't available, ask for access by email.")
+        app_label.setToolTip("Joining takes two steps on the phone: join the tester group, then opt in on "
+                             "Google Play. The page explains both. Stuck? Ask for access by email.")
         app_qr_btn = QPushButton("QR")
         app_qr_btn.setToolTip("Show the test link as a QR code to scan with the phone")
         app_qr_btn.clicked.connect(self._show_app_qr)
@@ -555,9 +555,10 @@ class MapperSyncPlugin:
         box.setWindowTitle("Get the Mappa Mundi app")
         box.setIconPixmap(qr_pixmap(APP_TESTING_URL, module_px=6))
         box.setText(
-            "Scan with the Android phone's camera to open the Google Play test page.<br><br>"
-            "If it says the app isn't available, you're not on the tester list yet: "
-            f'<a href="{ACCESS_MAILTO}">ask for access</a> at {ACCESS_EMAIL} '
+            "Scan with the Android phone's camera to open the instructions for joining the test: "
+            "join the tester group, then become a tester on Google Play.<br><br>"
+            "Stuck? "
+            f'<a href="{ACCESS_MAILTO}">Ask for access</a> at {ACCESS_EMAIL} '
             "and include the Gmail address you use on the phone."
         )
         box.setTextFormat(Qt.TextFormat.RichText)
